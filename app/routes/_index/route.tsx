@@ -6,6 +6,29 @@ import { login } from "../../shopify.server";
 
 import styles from "./styles.module.css";
 
+const agents = [
+  {
+    name: "Margin Guardian",
+    description: "Protects profit before any discount or recovery offer goes live.",
+  },
+  {
+    name: "Cart Sniper",
+    description: "Recovers abandoned carts with controlled, margin-safe follow-ups.",
+  },
+  {
+    name: "AI Personal Shopper",
+    description: "Lifts AOV with guided bundles and product recommendations.",
+  },
+  {
+    name: "Retention Engine",
+    description: "Brings customers back using search intent and buying signals.",
+  },
+  {
+    name: "Revenue Analyst",
+    description: "Turns agent activity into simple ROI and next-step reports.",
+  },
+];
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
 
@@ -20,39 +43,49 @@ export default function App() {
   const { showForm } = useLoaderData<typeof loader>();
 
   return (
-    <div className={styles.index}>
-      <div className={styles.content}>
-        <h1 className={styles.heading}>A short heading about [your app]</h1>
+    <main className={styles.page}>
+      <section className={styles.hero}>
+        <div className={styles.kicker}>ANOTAI for Shopify</div>
+        <h1 className={styles.heading}>
+          Hire a 5-person AI revenue team without hiring employees.
+        </h1>
         <p className={styles.text}>
-          A tagline about [your app] that describes your value proposition.
+          ANOTAI gives solo Shopify founders autonomous agents for margin
+          protection, cart recovery, upsells, retention, and revenue reporting.
         </p>
+
         {showForm && (
           <Form className={styles.form} method="post" action="/auth/login">
             <label className={styles.label}>
-              <span>Shop domain</span>
-              <input className={styles.input} type="text" name="shop" />
-              <span>e.g: my-shop-domain.myshopify.com</span>
+              <span>Shopify store domain</span>
+              <input
+                className={styles.input}
+                type="text"
+                name="shop"
+                placeholder="your-store.myshopify.com"
+              />
             </label>
             <button className={styles.button} type="submit">
-              Log in
+              Open ANOTAI
             </button>
           </Form>
         )}
-        <ul className={styles.list}>
-          <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
-          </li>
-          <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
-          </li>
-          <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
-          </li>
-        </ul>
-      </div>
-    </div>
+      </section>
+
+      <section className={styles.panel} aria-label="Starter agent team">
+        <div className={styles.panelHeader}>
+          <span>Starter team</span>
+          <strong>$999/mo</strong>
+        </div>
+        <div className={styles.agentGrid}>
+          {agents.map((agent) => (
+            <article className={styles.agentCard} key={agent.name}>
+              <h2>{agent.name}</h2>
+              <p>{agent.description}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+    </main>
   );
 }
