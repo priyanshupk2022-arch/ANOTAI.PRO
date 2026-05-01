@@ -114,7 +114,7 @@ Return valid JSON:
       customer_email: customerEmail,
       chat_history: history.slice(-10), // Keep last 10 messages
       updated_at: new Date().toISOString()
-    });
+    }, { onConflict: 'store_id,customer_email' });
 
     // 6. Log Action
     await supabase.from("agent_actions").insert({

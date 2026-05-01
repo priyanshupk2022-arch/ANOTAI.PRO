@@ -39,8 +39,45 @@ CREATE TABLE IF NOT EXISTS products_cogs (
   UNIQUE(store_id, variant_id)
 );
 
+-- 3. CART EVENTS — Abandoned cart tracking (Cart Sniper)
+CREATE TABLE IF NOT EXISTS cart_events (
+  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  store_id          UUID REFERENCES stores(id) ON DELETE CASCADE,
+  cart_token        TEXT NOT NULL,
+  customer_email    TEXT,
+  cart_data         JSONB NOT NULL, -- Array of products
+  status            TEXT DEFAULT 'abandoned' CHECK (status IN ('abandoned', 'sniped', 'recovered', 'expired')),
+  abandoned_at      TIMESTAMPTZ DEFAULT now(),
+  recovery_sent     BOOLEAN DEFAULT false,
+  recovery_level    INTEGER DEFAULT 0,
+  discount_code     TEXT,
+  discount_expires  TIMESTAMPTZ,
+  recovered_at      TIMESTAMPTZ,
+  UNIQUE(store_id, cart_token)
+);
+
+-- 4. AGENT ACTIONS — Audit log & performance metrics
+CREATE TABLE IF NOT EXISTS agent_actions (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  store_id        UUID REFERENCES stores(id) ON DELETE CASCADE,
+  agent_name      TEXT NOT NULL,
+  action_type     TEXT NOT NULL,
+  payload         JSONB DEFAULT '{}',
+  status          TEXT DEFAULT 'executed',
+  revenue_impact  DECIMAL(10,2) DEFAULT 0,
+  created_at      TIMESTAMPTZ DEFAULT now()
+);
+
 -- 5. CUSTOMER INTENTS — Search intent tracking (Retention Engine)
--- ... (existing customer_intents) ...
+CREATE TABLE IF NOT EXISTS customer_intents (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  store_id        UUID REFERENCES stores(id) ON DELETE CASCADE,
+  customer_email  TEXT,
+  search_query    TEXT NOT NULL,
+  intent_score    INTEGER DEFAULT 0,
+  products_viewed JSONB DEFAULT '[]',
+  created_at      TIMESTAMPTZ DEFAULT now()
+);
 
 -- 6. SHOPPER SESSIONS — Conversational Context (Personal Shopper)
 CREATE TABLE IF NOT EXISTS shopper_sessions (
@@ -50,7 +87,8 @@ CREATE TABLE IF NOT EXISTS shopper_sessions (
   chat_history    JSONB NOT NULL DEFAULT '[]', -- Array of {role: "user"|"assistant", content: "..."}
   skin_profile    JSONB DEFAULT '{}',          -- {skin_type: "...", concerns: [...]}
   created_at      TIMESTAMPTZ DEFAULT now(),
-  updated_at      TIMESTAMPTZ DEFAULT now()
+  updated_at      TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(store_id, customer_email)
 );
 
 -- ─── Indexes for Performance ─────────────────────────────
