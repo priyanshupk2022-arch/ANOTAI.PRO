@@ -27,7 +27,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const toList = (value: FormDataEntryValue | null) =>
     String(value ?? "")
       .split(",")
-      .map((category) => category.trim())
+      .map((entry) => entry.trim())
       .filter(Boolean);
   const categories = toList(formData.get("categories"));
 
