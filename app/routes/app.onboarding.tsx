@@ -24,11 +24,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : 0;
   };
-  const categories = (formData.get("categories") ?? "")
-    .toString()
-    .split(",")
-    .map((category) => category.trim())
-    .filter(Boolean);
+  const toList = (value: FormDataEntryValue | null) =>
+    String(value ?? "")
+      .split(",")
+      .map((category) => category.trim())
+      .filter(Boolean);
+  const categories = toList(formData.get("categories"));
 
   const settings = {
     niche: String(formData.get("niche") || ""),

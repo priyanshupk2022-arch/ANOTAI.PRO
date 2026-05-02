@@ -8,7 +8,7 @@
 
   if (!trigger || !windowEl || !closeBtn || !sendBtn || !inputEl || !messagesEl) return;
 
-  const shop = window.Shopify?.shop || window.ShopifyAnalytics?.meta?.shop || '';
+  const shop = window.Shopify?.shop || window.ShopifyAnalytics?.meta?.shop || null;
   const customerEmail = window.ShopifyAnalytics?.meta?.page?.customerEmail || localStorage.getItem('anotai_customer_email') || 'guest@example.com';
 
   // Toggle Chat
