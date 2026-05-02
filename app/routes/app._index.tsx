@@ -11,7 +11,6 @@ import { useLoaderData } from "@remix-run/react";
 import { createClient } from "@supabase/supabase-js";
 import { useEffect, useMemo, useState } from "react";
 import { authenticate } from "~/shopify.server";
-import { getDashboardOverview, getActivityFeed } from "~/agents/orchestrator";
 import { ensureStoreForSession } from "~/utils/store.server";
 import "~/styles/dashboard.css";
 
@@ -119,6 +118,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   let activity: any[] = [];
 
   try {
+    // Dynamic import to prevent Vite from including server-only modules in client bundle
+    const { getDashboardOverview, getActivityFeed } = await import("~/agents/orchestrator");
+    
     const dashboardData = await withDashboardTimeout(
       Promise.all([getDashboardOverview(store.id), getActivityFeed(store.id, 15)]) as Promise<
         [any, any[]]
