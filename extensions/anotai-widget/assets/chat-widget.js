@@ -6,8 +6,23 @@
   const inputEl = document.getElementById('anotai-chat-input');
   const messagesEl = document.getElementById('anotai-chat-messages');
 
-  const shop = Shopify.shop;
-  const customerEmail = window.ShopifyAnalytics?.meta?.page?.customerEmail || localStorage.getItem('anotai_customer_email') || 'guest@example.com';
+  if (!trigger || !windowEl || !closeBtn || !sendBtn || !inputEl || !messagesEl) return;
+
+  const shop = window.Shopify?.shop || window.ShopifyAnalytics?.meta?.shop || null;
+  let storedEmail = null;
+  try {
+    storedEmail = localStorage.getItem('anotai_customer_email');
+  } catch (e) {
+    storedEmail = null;
+  }
+  const randomToken = window.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  const guestEmail = storedEmail || `guest-${randomToken}@guest.invalid`;
+  if (!storedEmail) {
+    try {
+      localStorage.setItem('anotai_customer_email', guestEmail);
+    } catch (e) {}
+  }
+  const customerEmail = window.ShopifyAnalytics?.meta?.page?.customerEmail || guestEmail;
 
   // Toggle Chat
   trigger.addEventListener('click', () => windowEl.classList.toggle('hidden'));
@@ -17,6 +32,10 @@
   async function sendMessage() {
     const text = inputEl.value.trim();
     if (!text) return;
+    if (!shop) {
+      appendMessage('bot', "Store connection missing. Please reload and try again.");
+      return;
+    }
 
     // 1. Add User Message
     appendMessage('user', text);

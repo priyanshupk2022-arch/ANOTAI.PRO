@@ -16,12 +16,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     shop: session.shop,
     planStatus: store?.plan_status || "setup_pending",
     storeReady: Boolean(store),
-    appUrl: process.env.SHOPIFY_APP_URL || "",
   });
 };
 
 export default function SettingsPage() {
-  const { shop, planStatus, storeReady, appUrl } = useLoaderData<typeof loader>();
+  const { shop, planStatus, storeReady } = useLoaderData<typeof loader>();
 
   return (
     <div className="dashboard-layout animate-fade-in">

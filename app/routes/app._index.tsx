@@ -201,7 +201,6 @@ export default function Dashboard() {
     }
   };
   const battPct = (s: number, m: number) => Math.round((s / m) * 100);
-  const battCls = (p: number) => p <= 10 ? "critical" : p <= 30 ? "low" : "";
 
   return (
     <div className="dashboard-layout animate-fade-in">
