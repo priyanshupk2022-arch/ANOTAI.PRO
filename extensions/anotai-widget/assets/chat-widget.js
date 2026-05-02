@@ -15,8 +15,8 @@
   } catch (e) {
     storedEmail = null;
   }
-  const randomToken = window.crypto?.randomUUID?.() || Math.random().toString(36).slice(2);
-  const guestEmail = storedEmail || `guest-${randomToken}@guest.anotai`;
+  const randomToken = window.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  const guestEmail = storedEmail || `guest-${randomToken}@guest.invalid`;
   if (!storedEmail) {
     try {
       localStorage.setItem('anotai_customer_email', guestEmail);
