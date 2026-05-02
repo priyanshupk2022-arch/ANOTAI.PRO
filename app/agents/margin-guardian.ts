@@ -34,6 +34,18 @@ export interface ValidationResult {
     requested_discount_pct: number;
     discounted_price: number;
   }[];
+  requested_discount: number;
+  requested_discount_safe: boolean;
+  alternative_offer_type: "discount" | "bundle" | "free_shipping" | "no_discount_value_offer" | "none";
+  alternative_offer_value: string;
+  estimated_shipping_cost: number | null;
+  free_shipping_margin_safe: boolean;
+  auto_free_shipping_allowed: boolean;
+  final_estimated_profit: number;
+  final_estimated_margin: number;
+  auto_reply_allowed: boolean;
+  requires_merchant_approval: boolean;
+  customer_message_status: "sent" | "drafted" | "blocked";
 }
 
 export interface MarginReport {
@@ -56,11 +68,16 @@ export async function validateDiscount(
   storeId: string,
   variantIds: string[],
   currentPrices: Record<string, number>,
-  requestedDiscountPct: number
+  requestedDiscountPct: number,
+  merchantAutoApproveLimit: number = 15,
+  merchantAllowsAutoFreeShipping: boolean = false,
+  estimatedShippingCost: number | null = null
 ): Promise<ValidationResult> {
   const details: ValidationResult["details"] = [];
   let overallApproved = true;
   let minSafeDiscountPct = requestedDiscountPct;
+  let totalCurrentPrice = 0;
+  let totalCogs = 0;
 
   for (const variantId of variantIds) {
     // Fetch COGS for this variant
@@ -86,6 +103,9 @@ export async function validateDiscount(
     const discountedPrice = currentPrice * (1 - requestedDiscountPct / 100);
     const maxSafe = calculateMaxDiscount(currentPrice, cogs.cogs);
 
+    totalCurrentPrice += currentPrice;
+    totalCogs += cogs.cogs;
+
     if (discountedPrice < minPrice) {
       overallApproved = false;
       minSafeDiscountPct = Math.min(minSafeDiscountPct, maxSafe);
@@ -102,6 +122,51 @@ export async function validateDiscount(
     });
   }
 
+  // Calculate Alternative Offer
+  let altOfferType: ValidationResult["alternative_offer_type"] = "none";
+  let altOfferValue = "0";
+  let freeShippingMarginSafe = false;
+  let finalEstimatedProfit = 0;
+  let finalEstimatedMargin = 0;
+
+  if (!overallApproved) {
+    if (minSafeDiscountPct > 0) {
+      altOfferType = "discount";
+      altOfferValue = Math.floor(minSafeDiscountPct).toString();
+      finalEstimatedProfit = (totalCurrentPrice * (1 - Math.floor(minSafeDiscountPct) / 100)) - totalCogs;
+      finalEstimatedMargin = totalCurrentPrice > 0 ? (finalEstimatedProfit / totalCurrentPrice) * 100 : 0;
+    } else {
+      altOfferType = "free_shipping";
+      altOfferValue = "free_shipping";
+      if (estimatedShippingCost !== null) {
+        finalEstimatedProfit = totalCurrentPrice - totalCogs - estimatedShippingCost;
+        finalEstimatedMargin = totalCurrentPrice > 0 ? (finalEstimatedProfit / totalCurrentPrice) * 100 : 0;
+        freeShippingMarginSafe = finalEstimatedMargin >= 20; // Floor
+      } else {
+        freeShippingMarginSafe = false;
+      }
+    }
+  } else {
+    altOfferType = "discount";
+    altOfferValue = requestedDiscountPct.toString();
+    finalEstimatedProfit = (totalCurrentPrice * (1 - requestedDiscountPct / 100)) - totalCogs;
+    finalEstimatedMargin = totalCurrentPrice > 0 ? (finalEstimatedProfit / totalCurrentPrice) * 100 : 0;
+  }
+
+  // Determine Auto Reply Rules
+  let autoReplyAllowed = false;
+  
+  if (overallApproved) {
+    autoReplyAllowed = true;
+  } else if (altOfferType === "discount") {
+    autoReplyAllowed = finalEstimatedMargin >= 20 && Number(altOfferValue) <= merchantAutoApproveLimit;
+  } else if (altOfferType === "free_shipping") {
+    autoReplyAllowed = freeShippingMarginSafe && merchantAllowsAutoFreeShipping;
+  }
+
+  const requiresMerchantApproval = !autoReplyAllowed;
+  const messageStatus = autoReplyAllowed ? "sent" : "drafted";
+
   // Log this action
   await logGuardianAction(storeId, overallApproved, requestedDiscountPct, minSafeDiscountPct, details);
 
@@ -112,6 +177,18 @@ export async function validateDiscount(
       ? `✅ Discount approved. All products maintain 20%+ margin.`
       : `⛔ Discount BLOCKED. Would breach margin floor. Max safe discount: ${Math.floor(minSafeDiscountPct)}%`,
     details,
+    requested_discount: requestedDiscountPct,
+    requested_discount_safe: overallApproved,
+    alternative_offer_type: altOfferType,
+    alternative_offer_value: altOfferValue,
+    estimated_shipping_cost: estimatedShippingCost,
+    free_shipping_margin_safe: freeShippingMarginSafe,
+    auto_free_shipping_allowed: merchantAllowsAutoFreeShipping,
+    final_estimated_profit: Math.round(finalEstimatedProfit * 100) / 100,
+    final_estimated_margin: Math.round(finalEstimatedMargin * 100) / 100,
+    auto_reply_allowed: autoReplyAllowed,
+    requires_merchant_approval: requiresMerchantApproval,
+    customer_message_status: overallApproved ? "sent" : messageStatus,
   };
 }
 

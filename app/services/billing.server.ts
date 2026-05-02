@@ -17,12 +17,14 @@ const TRIAL_DAYS = 7; // 7-day free trial to hook them in
 const BILLING_TEST_MODE = process.env.SHOPIFY_BILLING_TEST !== "false";
 
 /**
- * Create a $999/mo recurring charge and return the confirmation URL.
+ * Create a recurring charge and return the confirmation URL.
  * Merchant must approve this on Shopify's payment page.
  */
 export async function createBillingCharge(
   admin: AdminApiContext,
-  returnUrl: string
+  returnUrl: string,
+  planName: string = "ANOTAI Growth",
+  planPrice: number = 999.0
 ): Promise<string> {
   const response = await admin.graphql(
     `#graphql
@@ -47,7 +49,7 @@ export async function createBillingCharge(
     }`,
     {
       variables: {
-        name: PLAN_NAME,
+        name: planName,
         returnUrl: returnUrl,
         trialDays: TRIAL_DAYS,
         test: BILLING_TEST_MODE,
@@ -55,7 +57,7 @@ export async function createBillingCharge(
           {
             plan: {
               appRecurringPricingDetails: {
-                price: { amount: PLAN_PRICE, currencyCode: "USD" },
+                price: { amount: planPrice, currencyCode: "USD" },
                 interval: "EVERY_30_DAYS",
               },
             },
@@ -76,11 +78,11 @@ export async function createBillingCharge(
 }
 
 /**
- * Check if the merchant has an active $999/mo subscription.
+ * Check if the merchant has an active subscription to any of our plans.
  */
 export async function checkBillingStatus(
   admin: AdminApiContext
-): Promise<{ active: boolean; subscription_id?: string; trial_days_remaining?: number }> {
+): Promise<{ active: boolean; subscription_id?: string; trial_days_remaining?: number; current_plan?: string }> {
   const response = await admin.graphql(
     `#graphql
     query {
@@ -113,7 +115,7 @@ export async function checkBillingStatus(
   const subs = data.data?.appInstallation?.activeSubscriptions || [];
 
   const activeSub = subs.find(
-    (s: any) => s.name === PLAN_NAME && s.status === "ACTIVE"
+    (s: any) => (s.name.includes("ANOTAI") || s.name.includes("Elite Agency")) && s.status === "ACTIVE"
   );
 
   if (activeSub) {
@@ -127,6 +129,7 @@ export async function checkBillingStatus(
       active: true,
       subscription_id: activeSub.id,
       trial_days_remaining: trialRemaining,
+      current_plan: activeSub.name
     };
   }
 
