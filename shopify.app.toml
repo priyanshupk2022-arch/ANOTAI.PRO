@@ -1,29 +1,46 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 client_id = "b6c75a835a41089f4b84b77579bf7a5e"
-application_url = "https://cultures-summer-tags-circle.trycloudflare.com"
+application_url = "https://your-app.fly.dev"   # ⚠️ UPDATE to your real production URL
 embedded = true
 name = "ANOTAI"
 
 [access_scopes]
-# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "read_products,write_discounts"
+# Full scopes required for all agents:
+# - Cart Sniper: read_orders, write_orders, read_checkouts
+# - Retention Engine: read_customers, write_customers
+# - Margin Guardian: read_products, write_discounts
+# - Personal Shopper: read_products
+# - Revenue Analyst: read_analytics
+# - GDPR Webhooks: read_customers (data_request handling)
+scopes = "read_products,write_products,read_orders,write_orders,read_customers,write_customers,read_draft_orders,write_draft_orders,read_analytics,write_checkouts,read_inventory,write_inventory,write_discounts"
 
 [webhooks]
 api_version = "2026-04"
 
+  # ── Core Business Webhooks ──────────────────────────────────────────
   [[webhooks.subscriptions]]
-  uri = "/webhooks/app/uninstalled"
+  uri = "/webhooks"
+  topics = [ "carts/update" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks"
+  topics = [ "orders/create" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks"
+  topics = [ "products/create", "products/update" ]
+
+  # ── App Lifecycle ───────────────────────────────────────────────────
+  [[webhooks.subscriptions]]
+  uri = "/webhooks"
   topics = [ "app/uninstalled" ]
 
   [[webhooks.subscriptions]]
   uri = "/webhooks/app/scopes_update"
   topics = [ "app/scopes_update" ]
 
-  [[webhooks.subscriptions]]
-  uri = "/webhooks"
-  topics = [ "products/create", "products/update" ]
-
+  # ── GDPR Mandatory ──────────────────────────────────────────────────
   [[webhooks.subscriptions]]
   uri = "/webhooks/customers/redact"
   topics = [ "customers/redact" ]
@@ -37,7 +54,12 @@ api_version = "2026-04"
   topics = [ "shop/redact" ]
 
 [auth]
-redirect_urls = [ "https://cultures-summer-tags-circle.trycloudflare.com/auth/callback", "https://cultures-summer-tags-circle.trycloudflare.com/auth/shopify/callback", "https://cultures-summer-tags-circle.trycloudflare.com/api/auth/callback" ]
+# ⚠️ UPDATE all URLs to your real production domain before deploy
+redirect_urls = [
+  "https://your-app.fly.dev/auth/callback",
+  "https://your-app.fly.dev/auth/shopify/callback",
+  "https://your-app.fly.dev/api/auth/callback"
+]
 
 [build]
 include_config_on_deploy = true
