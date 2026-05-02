@@ -53,23 +53,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   // ── 4. Idempotency check — skip already-processed events ─────────────
   if (shopifyEventId) {
-    const { data: existing } = await supabase
-      .from("processed_webhooks")
-      .select("id")
-      .eq("shopify_event_id", shopifyEventId)
-      .single();
-
-    if (existing) {
-      console.log(`[WEBHOOK] Duplicate event ${shopifyEventId} skipped (${topic})`);
-      return json({ success: true, skipped: true });
-    }
-
-    // Mark as processed before handling to prevent race conditions
-    await supabase.from("processed_webhooks").insert({
+    const { error: insertError } = await supabase.from("processed_webhooks").insert({
       shopify_event_id: shopifyEventId,
       store_id: store.id,
       topic,
     });
+
+    if (insertError) {
+      // 23505 is Postgres unique_violation error code
+      if (insertError.code === "23505") {
+        console.log(`[WEBHOOK_SPIKE] Duplicate event ${shopifyEventId} blocked (${topic})`);
+        return json({ success: true, skipped: true });
+      }
+      // Log other DB errors but don't fail yet
+      await ErrorLogger.webhook(store.id, topic, `DB Error: ${insertError.message}`, { shopifyEventId });
+    }
   }
 
   // ── 5. Check store automation kill switch ─────────────────────────────

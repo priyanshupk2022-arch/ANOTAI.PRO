@@ -117,8 +117,24 @@ export async function executeApprovedAction(storeId: string, actionId: string) {
     return { status: "manual_required", message: "Dangerous action type requires manual execution." };
   }
 
-  // 3. Execute Safe Actions
+  // 3. Execute Safe Actions (with Duplicate Protection)
   try {
+    // ATOMIC LOCK: Try to mark as executed BEFORE side effects
+    const { data: lockData, error: lockError } = await supabase
+      .from("action_queue")
+      .update({ 
+        status: "executed", 
+        executed_at: new Date().toISOString() 
+      })
+      .eq("id", actionId)
+      .eq("status", "approved") // Crucial: only if still approved
+      .select();
+
+    if (lockError || !lockData || lockData.length === 0) {
+      console.log(`[DUPLICATE_PREVENTION] Action ${actionId} already executing or processed. Skipping.`);
+      return { status: "skipped", message: "Action already processed or locked." };
+    }
+
     if (type === "send_recovery_email" || type === "propose_alternative" || type === "send_margin_safe_discount_reply" || type === "send_free_shipping_offer") {
       const result = await sendEmail({
         to: payload.customer_email || "",
@@ -127,7 +143,8 @@ export async function executeApprovedAction(storeId: string, actionId: string) {
       }, storeId);
 
       if (result.status === "sent") {
-        return await markActionExecuted(actionId, { ...result, customer_message_status: "sent" });
+        // Already marked as executed, just update result
+        return await updateActionResult(actionId, { ...result, customer_message_status: "sent" });
       } else {
         await ErrorLogger.actionExecution(storeId, type, result.error || "Email delivery failed.");
         return await markActionFailed(actionId, result.error || "Email delivery failed.");
@@ -135,15 +152,22 @@ export async function executeApprovedAction(storeId: string, actionId: string) {
     }
 
     if (type === "mark_task_completed") {
-      return await markActionExecuted(actionId, { success: true });
+      return await updateActionResult(actionId, { success: true });
     }
 
-    return await markActionExecuted(actionId, { success: true, note: "Generic execution completed." });
+    return await updateActionResult(actionId, { success: true, note: "Generic execution completed." });
 
   } catch (error: any) {
     await ErrorLogger.actionExecution(storeId, type, error);
     return await markActionFailed(actionId, error.message);
   }
+}
+
+export async function updateActionResult(actionId: string, resultData: any) {
+  const { data } = await supabase.from("action_queue").update({
+    result: resultData
+  }).eq("id", actionId).select().single();
+  return data;
 }
 
 export async function markActionExecuted(actionId: string, resultData: any) {

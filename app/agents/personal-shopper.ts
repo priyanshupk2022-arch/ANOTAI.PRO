@@ -6,7 +6,7 @@
  */
 
 import { supabase } from "~/utils/supabase.server";
-import { aiModel } from "~/utils/gemini.server";
+import { askAgent } from "~/utils/gemini.server";
 import { validateDiscount } from "./margin-guardian";
 
 // ─── Types ───────────────────────────────────────────────
@@ -82,13 +82,8 @@ Return valid JSON:
   "discount_intent": {"pct": 10, "reason": "Bundle offer"} (optional)
 }`;
 
-  // 3. Call LLM
-  const chat = aiModel.startChat({
-    history: history.map(m => ({ role: m.role === "user" ? "user" : "model", parts: [{ text: m.content }] })),
-  });
-
-  const result = await chat.sendMessage(systemPrompt + "\n\nUser Message: " + userMessage);
-  const responseText = result.response.text();
+  // 3. Call LLM (Protected with Rate Limits)
+  const responseText = await askAgent(storeId, systemPrompt + "\n\nUser Message: " + userMessage);
 
   try {
     const jsonMatch = responseText.match(/\{[\s\S]*\}/);

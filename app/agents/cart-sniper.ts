@@ -8,6 +8,7 @@
 
 import { supabase } from "~/utils/supabase.server";
 import { validateDiscount } from "./margin-guardian";
+import { askAgent } from "~/utils/gemini.server";
 
 // ─── Types ───────────────────────────────────────────────
 export interface CartEvent {
@@ -144,8 +145,7 @@ Content: Remind them why these products are great for their skin. Mention that w
 Avoid: Medical claims or aggressive sales pressure.
 Return only the HTML body of the email.`;
 
-  const aiResponse = await aiModel.generateContent(aiPrompt);
-  const emailHtml = (await aiResponse.response).text();
+  const emailHtml = await askAgent(storeId, aiPrompt);
 
   await supabase.from("cart_events").update({
     status: "sniped",

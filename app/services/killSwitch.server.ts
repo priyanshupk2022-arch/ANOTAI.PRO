@@ -1,21 +1,27 @@
 /**
- * 🛑 GLOBAL KILL SWITCH SERVICE
+ * 🛑 GLOBAL KILL SWITCH SERVICE — Phase 10 Enhanced
  *
- * Reads kill switches from environment variables first (instant override),
- * then falls back to store-level settings in merchant_agent_settings.
- *
- * Kill switches are checked BEFORE:
+ * Kill switches + rate limits + daily limits enforced BEFORE:
  * - Sending any email
  * - Auto-executing any Action Queue item
  * - Running War Room workflows
  * - Sending customer-facing AI replies
+ * - Making any AI call
  */
 
 import { supabase } from "~/utils/supabase.server";
+import {
+  assertGlobalAiCallRate,
+  assertGlobalEmailRate,
+  assertGlobalAutoExecutionRate,
+  assertGlobalWarRoomRate,
+  assertStoreDailyAiLimit,
+  assertStoreDailyEmailLimit,
+  assertStoreDailyExecutionLimit,
+} from "~/services/rateLimiter.server";
 
 // -------------------------------------------------------
 // GLOBAL KILL SWITCHES (env-controlled, instant override)
-// Set to "true" to pause globally regardless of store settings
 // -------------------------------------------------------
 function getGlobalFlags() {
   return {
@@ -81,8 +87,7 @@ export async function getStoreSafetySettings(storeId: string): Promise<StoreSafe
 
 // -------------------------------------------------------
 // PRE-EXECUTION SAFETY GATES
-// Call these functions before any automated action.
-// They throw a descriptive error if blocked.
+// Each gate checks: global kill switch → store setting → global rate → daily limit
 // -------------------------------------------------------
 
 export async function assertCanSendEmail(storeId: string): Promise<void> {
@@ -97,6 +102,10 @@ export async function assertCanSendEmail(storeId: string): Promise<void> {
   if (!store.recovery_emails_enabled) {
     throw new Error("[STORE_GATE] Recovery emails are disabled for this store.");
   }
+  // Phase 10: global rate limit
+  assertGlobalEmailRate();
+  // Phase 10: daily store limit
+  await assertStoreDailyEmailLimit(storeId, store.max_daily_recovery_emails);
 }
 
 export async function assertCanAutoExecute(storeId: string): Promise<void> {
@@ -108,6 +117,10 @@ export async function assertCanAutoExecute(storeId: string): Promise<void> {
   if (!store.automation_enabled) {
     throw new Error("[STORE_DISABLED] This store's automation is paused.");
   }
+  // Phase 10: global rate limit
+  assertGlobalAutoExecutionRate();
+  // Phase 10: daily store limit
+  await assertStoreDailyExecutionLimit(storeId, store.max_daily_auto_executions);
 }
 
 export async function assertCanRunWarRoom(storeId: string): Promise<void> {
@@ -119,6 +132,23 @@ export async function assertCanRunWarRoom(storeId: string): Promise<void> {
   if (!store.war_room_enabled) {
     throw new Error("[STORE_GATE] War Room is disabled for this store.");
   }
+  // Phase 10: global rate limit
+  assertGlobalWarRoomRate();
+}
+
+export async function assertCanMakeAiCall(storeId: string): Promise<void> {
+  const global = getGlobalFlags();
+  if (global.PAUSE_ALL_AUTO_EXECUTION) {
+    throw new Error("[KILL_SWITCH] Global auto-execution pause is active — AI calls blocked.");
+  }
+  const store = await getStoreSafetySettings(storeId);
+  if (!store.automation_enabled) {
+    throw new Error("[STORE_DISABLED] This store's automation is paused.");
+  }
+  // Phase 10: global rate limit
+  assertGlobalAiCallRate();
+  // Phase 10: daily store limit
+  await assertStoreDailyAiLimit(storeId, store.max_daily_ai_interactions);
 }
 
 export async function assertCanSendCustomerAiReply(storeId: string): Promise<void> {
@@ -130,6 +160,9 @@ export async function assertCanSendCustomerAiReply(storeId: string): Promise<voi
   if (!store.customer_ai_replies_enabled) {
     throw new Error("[STORE_GATE] Customer AI replies are disabled for this store.");
   }
+  // Phase 10: global AI rate limit
+  assertGlobalAiCallRate();
+  await assertStoreDailyAiLimit(storeId, store.max_daily_ai_interactions);
 }
 
 export async function assertCanSendDiscountReply(storeId: string): Promise<void> {

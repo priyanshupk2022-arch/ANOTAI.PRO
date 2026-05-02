@@ -12,16 +12,29 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     return null;
   });
 
+  const [hasCOGS, hasActions, safetySettings] = await Promise.all([
+    supabase.from("products_cogs").select("id").eq("store_id", store?.id || "").limit(1).then(r => !!r.data?.length),
+    supabase.from("agent_actions").select("id").eq("store_id", store?.id || "").limit(1).then(r => !!r.data?.length),
+    supabase.from("merchant_agent_settings").select("*").eq("store_id", store?.id || "").single().then(r => r.data),
+  ]);
+
   return json({
     shop: session.shop,
     planStatus: store?.plan_status || "setup_pending",
     storeReady: Boolean(store),
     appUrl: process.env.SHOPIFY_APP_URL || "",
+    onboardingStatus: {
+      hasCOGS,
+      hasActions,
+      safetyConfigured: Boolean(safetySettings),
+      recoveryEnabled: safetySettings?.recovery_emails_enabled || false,
+      playbookDone: Boolean(store?.settings?.brand_voice),
+    }
   });
 };
 
 export default function SettingsPage() {
-  const { shop, planStatus, storeReady, appUrl } = useLoaderData<typeof loader>();
+  const { shop, planStatus, storeReady, appUrl, onboardingStatus } = useLoaderData<typeof loader>();
 
   return (
     <div className="dashboard-layout animate-fade-in">
@@ -48,12 +61,6 @@ export default function SettingsPage() {
           <p className="page-subtitle">Configure your ANOTAI revenue operating system and check setup status.</p>
         </div>
 
-        {!storeReady && (
-          <div className="badge badge-warning" style={{ width: '100%', padding: '16px', marginBottom: '24px', borderRadius: '12px' }}>
-            ⚠️ System sync pending. Database connection required for production features.
-          </div>
-        )}
-
         <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: '32px' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
             <div className="card" style={{ marginBottom: 0 }}>
@@ -75,37 +82,11 @@ export default function SettingsPage() {
             </div>
 
             <div className="card" style={{ marginBottom: 0 }}>
-              <h2 className="section-title">🤖 AI Playbook (Beauty/Skincare)</h2>
-              <div className="feed-list">
-                <div className="feed-item">
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: '12px', color: 'var(--gray-400)', fontWeight: 700, textTransform: 'uppercase' }}>Expert Niche</div>
-                    <div style={{ fontWeight: 600, color: 'var(--navy)', textTransform: 'capitalize' }}>{store?.settings?.niche || "Not Set"}</div>
-                  </div>
-                </div>
-                <div className="feed-item">
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: '12px', color: 'var(--gray-400)', fontWeight: 700, textTransform: 'uppercase' }}>Brand Voice</div>
-                    <div style={{ fontWeight: 600, color: 'var(--navy)', textTransform: 'capitalize' }}>{store?.settings?.brand_voice || "Not Set"}</div>
-                  </div>
-                </div>
-                <div className="feed-item">
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: '12px', color: 'var(--gray-400)', fontWeight: 700, textTransform: 'uppercase' }}>Safety Margin Floor</div>
-                    <div style={{ fontWeight: 600, color: 'var(--green)' }}>{store?.settings?.margin_target || 0}%</div>
-                  </div>
-                </div>
-              </div>
-              <Link to="/app/onboarding" className="btn-primary" style={{ marginTop: '20px', display: 'inline-block', textAlign: 'center', background: 'var(--gray-100)', color: 'var(--navy)' }}>
-                🔄 Re-run AI Training
-              </Link>
-            </div>
-
-            <div className="card" style={{ marginBottom: 0 }}>
               <h2 className="section-title">⚡ Quick Actions</h2>
               <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
                 <Link to="/app/cogs" className="btn-primary">Update COGS</Link>
                 <Link to="/app/pixel" className="btn-primary" style={{ background: 'var(--primary)' }}>Setup Pixel</Link>
+                <Link to="/app/onboarding" className="btn-primary" style={{ background: 'var(--gray-200)', color: 'var(--navy)' }}>Edit Playbook</Link>
               </div>
             </div>
           </div>
@@ -113,10 +94,12 @@ export default function SettingsPage() {
           <div className="card" style={{ marginBottom: 0 }}>
             <h2 className="section-title">🚀 Launch Checklist</h2>
             <div className="feed-list">
-              <ChecklistItem label="COGS Data" description="Required for Margin Guardian" status={storeReady ? 'done' : 'pending'} />
-              <ChecklistItem label="AI Playbook" description="Skincare expert training" status={store?.settings?.onboarded ? 'done' : 'pending'} />
-              <ChecklistItem label="Web Pixel" description="Required for Retention Engine" status="pending" />
-              <ChecklistItem label="Billing" description="Required for production" status={planStatus === 'active' ? 'done' : 'pending'} />
+              <ChecklistItem label="Brand Playbook" description="Expert niche & brand voice training" status={onboardingStatus.playbookDone ? 'done' : 'pending'} />
+              <ChecklistItem label="COGS Added" description="Required for Margin Guardian protection" status={onboardingStatus.hasCOGS ? 'done' : 'pending'} />
+              <ChecklistItem label="Safety Config" description="Daily limits & automation gates" status={onboardingStatus.safetyConfigured ? 'done' : 'pending'} />
+              <ChecklistItem label="Cart Recovery" description="Enable Cart Sniper engine" status={onboardingStatus.recoveryEnabled ? 'done' : 'pending'} />
+              <ChecklistItem label="First Action" description="AI observed its first interaction" status={onboardingStatus.hasActions ? 'done' : 'pending'} />
+              <ChecklistItem label="Billing" description="Approve the beta/production plan" status={planStatus === 'active' ? 'done' : 'pending'} />
             </div>
           </div>
         </div>
