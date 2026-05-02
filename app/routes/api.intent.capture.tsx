@@ -17,6 +17,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     "Access-Control-Allow-Headers": "Content-Type",
   };
 
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: corsHeaders });
+  }
+
   if (request.method !== "POST") {
     return json({ error: "Method not allowed" }, { status: 405, headers: corsHeaders });
   }

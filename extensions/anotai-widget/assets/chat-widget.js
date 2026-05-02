@@ -6,7 +6,9 @@
   const inputEl = document.getElementById('anotai-chat-input');
   const messagesEl = document.getElementById('anotai-chat-messages');
 
-  const shop = Shopify.shop;
+  if (!trigger || !windowEl || !closeBtn || !sendBtn || !inputEl || !messagesEl) return;
+
+  const shop = window.Shopify?.shop || window.ShopifyAnalytics?.meta?.shop || '';
   const customerEmail = window.ShopifyAnalytics?.meta?.page?.customerEmail || localStorage.getItem('anotai_customer_email') || 'guest@example.com';
 
   // Toggle Chat
@@ -17,6 +19,10 @@
   async function sendMessage() {
     const text = inputEl.value.trim();
     if (!text) return;
+    if (!shop) {
+      appendMessage('bot', "Store connection missing. Please reload and try again.");
+      return;
+    }
 
     // 1. Add User Message
     appendMessage('user', text);

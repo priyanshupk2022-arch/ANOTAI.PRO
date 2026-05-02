@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, useActionData, useLoaderData, useNavigation } from "@remix-run/react";
+import { Form, useActionData, useNavigation } from "@remix-run/react";
 import { authenticate } from "~/shopify.server";
 import { supabase } from "~/utils/supabase.server";
 import { ensureStoreForSession } from "~/utils/store.server";
@@ -9,26 +9,35 @@ import "~/styles/dashboard.css";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
-  const store = await ensureStoreForSession(session);
+  await ensureStoreForSession(session);
   
   // If already onboarded, redirect to dashboard (optional check)
   // if (store.settings?.onboarded) return redirect("/app");
 
-  return json({ storeId: store.id });
+  return json({});
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const formData = await request.formData();
-  
+  const toNumber = (value: FormDataEntryValue | null) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+  const categories = (formData.get("categories") ?? "")
+    .toString()
+    .split(",")
+    .map((category) => category.trim())
+    .filter(Boolean);
+
   const settings = {
-    niche: formData.get("niche"),
-    brand_voice: formData.get("brand_voice"),
-    max_discount: Number(formData.get("max_discount")),
-    margin_target: Number(formData.get("margin_target")),
-    autonomy_mode: formData.get("autonomy_mode"),
-    email_limit: Number(formData.get("email_limit")),
-    bestseller_categories: formData.get("categories")?.toString().split(",").map(s => s.trim()),
+    niche: String(formData.get("niche") || ""),
+    brand_voice: String(formData.get("brand_voice") || ""),
+    max_discount: toNumber(formData.get("max_discount")),
+    margin_target: toNumber(formData.get("margin_target")),
+    autonomy_mode: String(formData.get("autonomy_mode") || ""),
+    email_limit: toNumber(formData.get("email_limit")),
+    bestseller_categories: categories,
     onboarded: true
   };
 
@@ -42,7 +51,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 export default function OnboardingPage() {
   const [step, setStep] = useState(1);
-  const { storeId } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const nav = useNavigation();
 
@@ -56,6 +64,11 @@ export default function OnboardingPage() {
           <h1 className="page-title" style={{ fontSize: '28px' }}>Setup Your AI Playbook</h1>
           <p className="page-subtitle">Let's train your AI agents on your brand's unique voice and rules.</p>
         </div>
+        {actionData?.error && (
+          <div className="badge badge-error" style={{ width: "100%", marginBottom: "20px", padding: "12px", borderRadius: "10px" }}>
+            {actionData.error}
+          </div>
+        )}
 
         <div style={{ marginBottom: '32px' }}>
           <div style={{ height: '4px', background: '#F1F5F9', borderRadius: '2px' }}>
