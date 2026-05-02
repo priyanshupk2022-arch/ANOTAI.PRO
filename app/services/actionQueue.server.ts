@@ -1,5 +1,7 @@
 import { supabase } from "~/utils/supabase.server";
 import { sendEmail } from "./email.server";
+import { assertCanAutoExecute } from "~/services/killSwitch.server";
+import { ErrorLogger } from "~/services/errorLogger.server";
 
 export async function createActionQueueItem({
   storeId,
@@ -90,6 +92,14 @@ export async function executeApprovedAction(storeId: string, actionId: string) {
   const payload = action.action_payload || {};
   const type = action.action_type;
 
+  // 0. Kill switch: check before any auto-execution
+  try {
+    await assertCanAutoExecute(storeId);
+  } catch (err: any) {
+    await ErrorLogger.actionExecution(storeId, type, err.message);
+    return await markActionFailed(actionId, err.message);
+  }
+
   // 1. Re-validate Safety for sensitive actions (discounts/shipping)
   if (type === "propose_alternative" || type === "send_margin_safe_discount_reply" || type === "send_free_shipping_offer") {
     const isSafe = payload.alternative_offer_safe !== false && 
@@ -110,16 +120,16 @@ export async function executeApprovedAction(storeId: string, actionId: string) {
   // 3. Execute Safe Actions
   try {
     if (type === "send_recovery_email" || type === "propose_alternative" || type === "send_margin_safe_discount_reply" || type === "send_free_shipping_offer") {
-      // Mock/Real Email Send
       const result = await sendEmail({
-        to: payload.customer_email || "customer@example.com",
+        to: payload.customer_email || "",
         subject: payload.email_subject || "Exclusive Offer from our Store",
         html: payload.email_body || `<p>Hello, we have a special offer for you: ${payload.alternative_offer_value || 'Free Shipping'}</p>`
-      });
+      }, storeId);
 
       if (result.status === "sent") {
         return await markActionExecuted(actionId, { ...result, customer_message_status: "sent" });
       } else {
+        await ErrorLogger.actionExecution(storeId, type, result.error || "Email delivery failed.");
         return await markActionFailed(actionId, result.error || "Email delivery failed.");
       }
     }
@@ -128,10 +138,10 @@ export async function executeApprovedAction(storeId: string, actionId: string) {
       return await markActionExecuted(actionId, { success: true });
     }
 
-    // Default: Mark as executed if type is unknown but approved
     return await markActionExecuted(actionId, { success: true, note: "Generic execution completed." });
 
   } catch (error: any) {
+    await ErrorLogger.actionExecution(storeId, type, error);
     return await markActionFailed(actionId, error.message);
   }
 }

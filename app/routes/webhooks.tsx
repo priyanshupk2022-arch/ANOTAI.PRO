@@ -1,10 +1,11 @@
 /**
- * 📡 WEBHOOK ENDPOINTS — Shopify Webhook Handlers
- * 
- * Receives and processes webhooks from Shopify:
- * - carts/update → Cart Sniper
- * - orders/create → Track recovered carts
- * - app/uninstalled → GDPR cleanup
+ * 📡 WEBHOOK ENDPOINTS — Shopify Webhook Handlers (Phase 8 Hardened)
+ *
+ * Changes vs pre-Phase 8:
+ * - Idempotency check: duplicate webhook event IDs are skipped
+ * - Error logger integration: all failures are persisted to error_logs
+ * - Kill switch: automation_enabled is checked before processing
+ * - Silent errors log + still return 200 (Shopify requirement)
  */
 
 import type { ActionFunctionArgs } from "@remix-run/node";
@@ -13,29 +14,32 @@ import { verifyWebhookHMAC, getWebhookTopic, getWebhookShopDomain } from "~/serv
 import { handleCartWebhook, markCartRecovered } from "~/agents/cart-sniper";
 import { executeVIPDrop } from "~/agents/retention-engine";
 import { supabase } from "~/utils/supabase.server";
+import { ErrorLogger } from "~/services/errorLogger.server";
+import { getStoreSafetySettings } from "~/services/killSwitch.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  // Step 1: Read raw body for HMAC verification
   const rawBody = await request.text();
   const hmacHeader = request.headers.get("x-shopify-hmac-sha256") || "";
+  const shopifyEventId = request.headers.get("x-shopify-webhook-id") || "";
   const topic = getWebhookTopic(request.headers);
   const shopDomain = getWebhookShopDomain(request.headers);
 
-  // Step 2: Verify HMAC signature
+  // ── 1. HMAC Verification ──────────────────────────────────────────────
   if (!verifyWebhookHMAC(rawBody, hmacHeader)) {
-    console.error(`⛔ Webhook HMAC verification failed for ${topic} from ${shopDomain}`);
+    await ErrorLogger.webhook(null, topic, `HMAC verification failed for ${shopDomain}`, { shopDomain, topic });
     return json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Step 3: Parse the payload
+  // ── 2. Parse payload ──────────────────────────────────────────────────
   let payload: any;
   try {
     payload = JSON.parse(rawBody);
   } catch {
+    await ErrorLogger.webhook(null, topic, "Invalid JSON body", { shopDomain, topic });
     return json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  // Step 4: Get the store from database
+  // ── 3. Resolve store ──────────────────────────────────────────────────
   const { data: store } = await supabase
     .from("stores")
     .select("id, plan_status")
@@ -43,17 +47,43 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     .single();
 
   if (!store) {
-    console.error(`⛔ Webhook received for unknown store: ${shopDomain}`);
+    await ErrorLogger.webhook(null, topic, `Webhook for unknown store: ${shopDomain}`, { shopDomain, topic });
     return json({ error: "Store not found" }, { status: 404 });
   }
 
-  // Step 5: Route to the correct agent based on topic
+  // ── 4. Idempotency check — skip already-processed events ─────────────
+  if (shopifyEventId) {
+    const { data: existing } = await supabase
+      .from("processed_webhooks")
+      .select("id")
+      .eq("shopify_event_id", shopifyEventId)
+      .single();
+
+    if (existing) {
+      console.log(`[WEBHOOK] Duplicate event ${shopifyEventId} skipped (${topic})`);
+      return json({ success: true, skipped: true });
+    }
+
+    // Mark as processed before handling to prevent race conditions
+    await supabase.from("processed_webhooks").insert({
+      shopify_event_id: shopifyEventId,
+      store_id: store.id,
+      topic,
+    });
+  }
+
+  // ── 5. Check store automation kill switch ─────────────────────────────
+  const safety = await getStoreSafetySettings(store.id);
+  if (!safety.automation_enabled && topic !== "app/uninstalled") {
+    console.log(`[KILL_SWITCH] Automation paused for ${shopDomain} — webhook ${topic} skipped`);
+    return json({ success: true, paused: true });
+  }
+
+  // ── 6. Route to agent ─────────────────────────────────────────────────
   try {
     switch (topic) {
       case "carts/update":
-        // Only process if billing is active
         if (store.plan_status !== "active") break;
-
         await handleCartWebhook(
           store.id,
           payload.token || payload.id,
@@ -67,75 +97,45 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             image_url: item.image?.src || null,
           }))
         );
-        console.log(`🎯 Cart Sniper: Processed cart update from ${shopDomain}`);
         break;
 
       case "orders/create":
         if (store.plan_status !== "active") break;
-
-        // Check if this order was from a recovered cart
-        const cartToken = payload.cart_token;
-        if (cartToken) {
-          await markCartRecovered(
-            store.id,
-            cartToken,
-            String(payload.id),
-            parseFloat(payload.total_price || "0")
-          );
-          console.log(`🎯 Cart Sniper: Order ${payload.id} tracked from ${shopDomain}`);
+        if (payload.cart_token) {
+          await markCartRecovered(store.id, payload.cart_token, String(payload.id), parseFloat(payload.total_price || "0"));
         }
         break;
 
       case "app/uninstalled":
-        // GDPR: Delete all store data
         await supabase.from("stores").delete().eq("id", store.id);
         console.log(`🗑️ Store ${shopDomain} uninstalled — all data deleted`);
         break;
 
       case "products/update":
-        // Sync stock status and titles
         for (const variant of (payload.variants || [])) {
           const inStock = variant.inventory_management === null || variant.inventory_quantity > 0;
           await supabase.from("products_cogs")
-            .update({ 
-              product_title: `${payload.title} - ${variant.title}`,
-              is_in_stock: inStock,
-              updated_at: new Date().toISOString()
-            })
+            .update({ product_title: `${payload.title} - ${variant.title}`, is_in_stock: inStock, updated_at: new Date().toISOString() })
             .eq("store_id", store.id)
             .eq("variant_id", String(variant.id));
         }
-        console.log(`📦 Inventory Sync: Updated stock for "${payload.title}" from ${shopDomain}`);
         break;
 
       case "products/create":
-        // RETENTION ENGINE: New product uploaded → trigger VIP Drop
         if (store.plan_status !== "active") break;
-
         const productUrl = `https://${shopDomain}/products/${payload.handle}`;
         const productImage = payload.images?.[0]?.src || payload.image?.src || "";
-
-        await executeVIPDrop(
-          store.id,
-          String(payload.id),
-          payload.title || "",
-          payload.body_html || "",
-          payload.tags ? payload.tags.split(", ") : [],
-          parseFloat(payload.variants?.[0]?.price || "0"),
-          productUrl,
-          productImage
-        );
-        console.log(`🔮 Retention Engine: VIP Drop triggered for "${payload.title}" from ${shopDomain}`);
+        await executeVIPDrop(store.id, String(payload.id), payload.title || "", payload.body_html || "", payload.tags ? payload.tags.split(", ") : [], parseFloat(payload.variants?.[0]?.price || "0"), productUrl, productImage);
         break;
 
       default:
-        console.log(`📡 Unhandled webhook topic: ${topic}`);
+        console.log(`[WEBHOOK] Unhandled topic: ${topic}`);
     }
-  } catch (error) {
-    console.error(`❌ Webhook processing error (${topic}):`, error);
-    // Still return 200 to prevent Shopify from retrying
+  } catch (error: any) {
+    // Log failure but still return 200 so Shopify doesn't retry infinitely
+    await ErrorLogger.webhook(store.id, topic, error, { shopDomain, payload_id: payload?.id });
+    console.error(`❌ Webhook error (${topic}):`, error);
   }
 
-  // Always respond 200 within 5 seconds (Shopify requirement)
   return json({ success: true });
 };
