@@ -22,7 +22,7 @@ async function runJobs(request: Request) {
     return json({ error: "Job runner secret is not configured" }, { status: 503 });
   }
 
-  if (secret && authHeader !== `Bearer ${secret}` && token !== secret) {
+  if (secret && authHeader !== `Bearer ${secret}`) {
     return json({ error: "Unauthorized" }, { status: 401 });
   }
 

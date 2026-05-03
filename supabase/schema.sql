@@ -162,6 +162,10 @@ CREATE INDEX IF NOT EXISTS idx_intents_store ON customer_intents(store_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_store ON shopper_sessions(store_id);
 
 -- ─── Row Level Security (RLS) ────────────────────────────
+-- All tables are protected by RLS.
+-- Service role bypasses RLS for server-side operations.
+-- For client-side access, ensure store-specific policies are applied (see Phase 11 hardening).
+
 ALTER TABLE stores ENABLE ROW LEVEL SECURITY;
 ALTER TABLE products_cogs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cart_events ENABLE ROW LEVEL SECURITY;
@@ -173,14 +177,3 @@ ALTER TABLE customer_activities ENABLE ROW LEVEL SECURITY;
 ALTER TABLE customer_intents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE shopper_sessions ENABLE ROW LEVEL SECURITY;
 
--- Service role bypasses RLS
-CREATE POLICY "stores_isolation" ON stores FOR ALL USING (true);
-CREATE POLICY "cogs_isolation" ON products_cogs FOR ALL USING (true);
-CREATE POLICY "cart_isolation" ON cart_events FOR ALL USING (true);
-CREATE POLICY "actions_isolation" ON agent_actions FOR ALL USING (true);
-CREATE POLICY "jobs_isolation" ON agent_jobs FOR ALL USING (true);
-CREATE POLICY "email_events_isolation" ON email_events FOR ALL USING (true);
-CREATE POLICY "customers_isolation" ON customers FOR ALL USING (true);
-CREATE POLICY "customer_activities_isolation" ON customer_activities FOR ALL USING (true);
-CREATE POLICY "intents_isolation" ON customer_intents FOR ALL USING (true);
-CREATE POLICY "sessions_isolation" ON shopper_sessions FOR ALL USING (true);

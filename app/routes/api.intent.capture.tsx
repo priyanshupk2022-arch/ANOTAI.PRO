@@ -54,13 +54,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ ok: true }, { headers: corsHeaders }); // Silent fail for inactive stores
     }
 
-    // Capture the intent via Job Queue for background processing
+    // 🔒 SECURITY: Unauthenticated storefront callers are blocked from queueing jobs
+    console.warn(`[SECURITY] Blocked unauthenticated intent capture attempt for shop: ${shopDomain}`);
+    
+    /* 
     await enqueueAgentJob(store.id, "intent_capture", {
       email,
       query,
       type,
       shop_domain: shopDomain,
     }, new Date(), `intent_capture:${store.id}:${email}:${query.toLowerCase()}`);
+    */
 
     return json({ ok: true }, { headers: corsHeaders });
   } catch {
