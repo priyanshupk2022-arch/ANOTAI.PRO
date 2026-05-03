@@ -11,6 +11,7 @@
 import { supabase } from "~/utils/supabase.server";
 import { askAgent } from "~/utils/gemini.server";
 import { sendEmail } from "~/services/email.server";
+import { assertCanSendEmail, assertCanMakeAiCall } from "~/services/kill-switch.server";
 import { decideAgentAction, getOwnerControls } from "~/services/agent-controls.server";
 import { recordCustomerActivity, upsertCustomerProfile } from "~/services/customer-data.server";
 
@@ -96,6 +97,7 @@ export async function captureSearchIntent(
  * Called when products/create webhook fires.
  */
 export async function extractProductKeywords(
+  storeId: string,
   productTitle: string,
   productDescription: string,
   productTags: string[]
@@ -115,7 +117,7 @@ Rules:
 Example output: ["leather jacket", "jacket", "black jacket", "men jacket", "leather coat"]`;
 
   try {
-    const response = await askAgent(prompt);
+    const response = await askAgent(storeId, prompt);
     const jsonMatch = response.match(/\[[\s\S]*?\]/);
     if (jsonMatch) {
       const keywords = JSON.parse(jsonMatch[0]);
@@ -148,7 +150,7 @@ export async function executeVIPDrop(
   productImageUrl?: string
 ): Promise<VIPDropResult> {
   // Step A: Extract keywords from the new product
-  const keywords = await extractProductKeywords(productTitle, productDescription, productTags);
+  const keywords = await extractProductKeywords(storeId, productTitle, productDescription, productTags);
 
   if (keywords.length === 0) {
     return { product_id: productId, product_title: productTitle, keywords_extracted: [], intents_matched: 0, emails_sent: 0 };
@@ -220,8 +222,18 @@ export async function executeVIPDrop(
 
   // Step C: Send VIP early-access emails
   let emailsSent = 0;
+  
+  // Phase 10: Global & Store safety gate
+  try {
+    await assertCanSendEmail(storeId);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : "Safety gate blocked VIP drop.";
+    await logIntentAction(storeId, "vip_drop_blocked", { reason: msg }, "blocked");
+    return { product_id: productId, product_title: productTitle, keywords_extracted: keywords, intents_matched: topMatches.length, emails_sent: 0 };
+  }
+
   for (const match of topMatches) {
-    const emailContent = await generateVIPEmail(match, productPrice, productUrl, productImageUrl);
+    const emailContent = await generateVIPEmail(storeId, match, productPrice, productUrl, productImageUrl);
     const result = await sendEmail({
       to: match.customer_email,
       subject: emailContent.subject,
@@ -274,6 +286,7 @@ export async function executeVIPDrop(
 // ─── VIP Email Generation ────────────────────────────────
 
 async function generateVIPEmail(
+  storeId: string,
   match: IntentMatch,
   productPrice: number,
   productUrl: string,
@@ -293,7 +306,7 @@ Rules:
 - Clean, minimal HTML with inline CSS`;
 
   try {
-    const response = await askAgent(prompt);
+    const response = await askAgent(storeId, prompt);
     const jsonMatch = response.match(/\{[\s\S]*\}/);
     if (jsonMatch) return JSON.parse(jsonMatch[0]);
   } catch (error) {

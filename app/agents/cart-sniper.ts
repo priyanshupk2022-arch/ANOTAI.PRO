@@ -12,6 +12,8 @@ import { decideAgentAction, getOwnerControls } from "~/services/agent-controls.s
 import { recordCustomerActivity, upsertCustomerProfile } from "~/services/customer-data.server";
 import { sendEmail } from "~/services/email.server";
 import { createShopifyRecoveryDiscount } from "~/services/shopify-discounts.server";
+import { assertCanSendEmail } from "~/services/kill-switch.server";
+import { ErrorLogger } from "~/services/error-logger.server";
 
 // ─── Types ───────────────────────────────────────────────
 export interface CartEvent {
@@ -183,6 +185,14 @@ export async function executeRecovery(
 
   if (!cartEvent || !ladder) {
     return { success: false, cart_event_id: String(cartEventOrId), reason: "Cart recovery target was not found." };
+  }
+
+  // Phase 10: Global & Store safety gate
+  try {
+    await assertCanSendEmail(storeId);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : "Safety gate blocked recovery.";
+    return { success: false, cart_event_id: cartEvent.id, reason: msg };
   }
 
   if (cartEvent.status !== "abandoned" || cartEvent.recovery_sent) {

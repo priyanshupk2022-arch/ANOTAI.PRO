@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { assertCanMakeAiCall } from "~/services/kill-switch.server";
 
 if (!process.env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is missing");
 
@@ -10,7 +11,8 @@ export const aiModel = genAI.getGenerativeModel({
   model: "gemini-1.5-pro",
 });
 
-export async function askAgent(prompt: string): Promise<string> {
+export async function askAgent(storeId: string, prompt: string): Promise<string> {
+  await assertCanMakeAiCall(storeId);
   try {
     const result = await aiModel.generateContent(prompt);
     const response = await result.response;

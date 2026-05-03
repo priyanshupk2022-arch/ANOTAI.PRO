@@ -95,7 +95,7 @@ export async function getSkincareConsultation(
 
   const status = bundle?.approval_required ? "approval_required" : questions.length > 0 ? "needs_more_info" : "ready";
   const summary = sanitizeSkincareCopy(
-    await buildConsultationCopy(input, routine, alternatives, controls.playbook.brandVoice)
+    await buildConsultationCopy(storeId, input, routine, alternatives, controls.playbook.brandVoice)
   );
 
   await supabase.from("agent_actions").insert({
@@ -136,7 +136,7 @@ export async function getRecommendations(
   const triggerProduct = catalog.find((product) => product.id === triggerProductId);
   if (!triggerProduct) return [];
 
-  const rawSuggestions = await callLLMForBundles(triggerProduct, catalog);
+  const rawSuggestions = await callLLMForBundles(storeId, triggerProduct, catalog);
   const controls = await getOwnerControls(storeId);
   const validatedBundles: BundleSuggestion[] = [];
 
@@ -186,6 +186,7 @@ export async function getRecommendations(
 }
 
 async function callLLMForBundles(
+  storeId: string,
   triggerProduct: ShopperCatalogProduct,
   catalog: ShopperCatalogProduct[]
 ): Promise<BundleSuggestion[]> {
@@ -225,7 +226,7 @@ Return valid JSON array only:
 }]`;
 
   try {
-    const response = await askAgent(prompt);
+    const response = await askAgent(storeId, prompt);
     const jsonMatch = response.match(/\[[\s\S]*\]/);
     if (!jsonMatch) return [];
 
@@ -298,6 +299,7 @@ async function buildSafeSkincareBundle(
 }
 
 async function buildConsultationCopy(
+  storeId: string,
   input: SkincareShopperInput,
   routine: RoutineRecommendation[],
   alternatives: RoutineRecommendation[],
@@ -328,7 +330,7 @@ Rules:
 - Keep it honest and conversion-focused.`;
 
   try {
-    return await askAgent(prompt);
+    return await askAgent(storeId, prompt);
   } catch {
     return baseCopy;
   }
@@ -468,7 +470,7 @@ function mapBundle(
       price: product.price,
     }));
 
-  if (!bundleProducts.some((product) => product.product_id === triggerProduct.id)) {
+  if (!bundleProducts.some((product: { product_id: string }) => product.product_id === triggerProduct.id)) {
     bundleProducts.unshift({
       product_id: triggerProduct.id,
       variant_id: triggerProduct.variant_id || triggerProduct.id,
