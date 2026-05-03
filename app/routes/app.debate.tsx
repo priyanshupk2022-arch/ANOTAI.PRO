@@ -11,7 +11,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const store = await ensureStoreForSession(session);
 
   if (!store) {
-    return json({ workflows: [] });
+    return json({ workflows: [], flatThreads: [] });
   }
 
   // Fetch hierarchical workflows and their tasks

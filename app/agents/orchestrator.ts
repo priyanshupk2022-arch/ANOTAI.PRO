@@ -15,14 +15,10 @@ import { getSniperMetrics, processScheduledRecoveries } from "./cart-sniper";
 import { getShopperMetrics } from "./personal-shopper";
 import { getMarginReport } from "./margin-guardian";
 import { getIntentMetrics } from "./retention-engine";
+import { AGENT_PROFILES } from "./profiles";
+import type { AgentMode, AgentName } from "./profiles";
+import { getOwnerControls } from "~/services/agent-controls.server";
 import { supabase } from "~/utils/supabase.server";
-
-export type AgentName =
-  | "personal_shopper"
-  | "cart_sniper"
-  | "margin_guardian"
-  | "retention_engine"
-  | "revenue_analyst";
 
 export interface AgentStatus {
   name: AgentName;
@@ -30,6 +26,7 @@ export interface AgentStatus {
   emoji: string;
   color: string;
   status: "active" | "idle" | "error";
+  mode: AgentMode;
   today_actions: number;
   revenue_impact: number;
 }
@@ -42,11 +39,14 @@ export async function getAgentStatuses(storeId: string): Promise<AgentStatus[]> 
   todayStart.setHours(0, 0, 0, 0);
   const since = todayStart.toISOString();
 
-  const { data: actions } = await supabase
-    .from("agent_actions")
-    .select("agent_name, revenue_impact")
-    .eq("store_id", storeId)
-    .gte("created_at", since);
+  const [{ data: actions }, controls] = await Promise.all([
+    supabase
+      .from("agent_actions")
+      .select("agent_name, revenue_impact")
+      .eq("store_id", storeId)
+      .gte("created_at", since),
+    getOwnerControls(storeId),
+  ]);
 
   const agentMap: Record<AgentName, { count: number; revenue: number }> = {
     margin_guardian: { count: 0, revenue: 0 },
@@ -56,85 +56,61 @@ export async function getAgentStatuses(storeId: string): Promise<AgentStatus[]> 
     revenue_analyst: { count: 0, revenue: 0 },
   };
 
-  actions?.forEach((a) => {
-    const name = a.agent_name as AgentName;
+  actions?.forEach((action) => {
+    const name = action.agent_name as AgentName;
     if (agentMap[name]) {
       agentMap[name].count++;
-      agentMap[name].revenue += a.revenue_impact || 0;
+      agentMap[name].revenue += Number(action.revenue_impact) || 0;
     }
   });
 
-  return [
-    {
-      name: "margin_guardian",
-      display_name: "Margin Guardian",
-      emoji: "🛡️",
-      color: "#10B981",
-      status: "active",
-      today_actions: agentMap.margin_guardian.count,
-      revenue_impact: agentMap.margin_guardian.revenue,
-    },
-    {
-      name: "personal_shopper",
-      display_name: "AI Personal Shopper",
-      emoji: "🛍️",
-      color: "#8B5CF6",
-      status: "active",
-      today_actions: agentMap.personal_shopper.count,
-      revenue_impact: agentMap.personal_shopper.revenue,
-    },
-    {
-      name: "cart_sniper",
-      display_name: "Cart Sniper",
-      emoji: "🎯",
-      color: "#F59E0B",
-      status: "active",
-      today_actions: agentMap.cart_sniper.count,
-      revenue_impact: agentMap.cart_sniper.revenue,
-    },
-    {
-      name: "retention_engine",
-      display_name: "Retention & Intent Engine",
-      emoji: "🔮",
-      color: "#EC4899",
-      status: "active",
-      today_actions: agentMap.retention_engine.count,
-      revenue_impact: agentMap.retention_engine.revenue,
-    },
-    {
-      name: "revenue_analyst",
-      display_name: "Revenue Analyst",
-      emoji: "RA",
-      color: "#0F172A",
-      status: "active",
-      today_actions: agentMap.revenue_analyst.count,
-      revenue_impact: agentMap.revenue_analyst.revenue,
-    },
-  ];
+  const colors: Record<AgentName, string> = {
+    margin_guardian: "#10B981",
+    personal_shopper: "#8B5CF6",
+    cart_sniper: "#F59E0B",
+    retention_engine: "#EC4899",
+    revenue_analyst: "#0F172A",
+  };
+
+  return AGENT_PROFILES.map((profile) => {
+    const mode = controls.agentModes[profile.name];
+
+    return {
+      name: profile.name,
+      display_name: profile.displayName,
+      emoji: profile.initials,
+      color: colors[profile.name],
+      status: mode === "locked" ? "idle" : "active",
+      mode,
+      today_actions: agentMap[profile.name].count,
+      revenue_impact: agentMap[profile.name].revenue,
+    };
+  });
 }
 
 /**
  * Get full dashboard overview data.
  */
 export async function getDashboardOverview(storeId: string) {
-  const [agentStatuses, sniperMetrics, shopperMetrics, marginReport, intentMetrics] = await Promise.all([
-    getAgentStatuses(storeId),
-    getSniperMetrics(storeId),
-    getShopperMetrics(storeId),
-    getMarginReport(storeId),
-    getIntentMetrics(storeId),
-  ]);
+  const [agentStatuses, sniperMetrics, shopperMetrics, marginReport, intentMetrics] =
+    await Promise.all([
+      getAgentStatuses(storeId),
+      getSniperMetrics(storeId),
+      getShopperMetrics(storeId),
+      getMarginReport(storeId),
+      getIntentMetrics(storeId),
+    ]);
 
-  const totalRevenueImpact = sniperMetrics.revenue_recovered + shopperMetrics.revenue_generated;
+  const totalRevenueImpact = (sniperMetrics.revenue_recovered || 0) + (shopperMetrics.revenue_generated || 0);
 
   return {
     agents: agentStatuses,
     metrics: {
       total_revenue_impact: totalRevenueImpact,
-      revenue_recovered: sniperMetrics.revenue_recovered,
-      aov_increase_pct: shopperMetrics.acceptance_rate,
-      intents_captured: intentMetrics.total_intents_captured,
-      vip_emails_sent: intentMetrics.targeted_emails_sent,
+      revenue_recovered: sniperMetrics.revenue_recovered || 0,
+      aov_increase_pct: shopperMetrics.acceptance_rate || 0,
+      intents_captured: intentMetrics.total_intents_captured || 0,
+      vip_emails_sent: intentMetrics.targeted_emails_sent || 0,
       margin_loss: 0,
     },
     sniper: sniperMetrics,

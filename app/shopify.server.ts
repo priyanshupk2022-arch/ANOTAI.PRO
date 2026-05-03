@@ -2,17 +2,29 @@ import "@shopify/shopify-app-remix/adapters/node";
 import {
   ApiVersion,
   AppDistribution,
+  BillingInterval,
   shopifyApp,
 } from "@shopify/shopify-app-remix/server";
 import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
 import prisma from "./db.server";
 import { ensureStoreForSession } from "./utils/store.server";
 
+const REQUIRED_SCOPES = ["read_products", "read_orders", "write_discounts"];
+
+function getShopifyScopes() {
+  const configuredScopes = process.env.SCOPES
+    ?.split(",")
+    .map((scope) => scope.trim())
+    .filter(Boolean);
+
+  return Array.from(new Set([...(configuredScopes || []), ...REQUIRED_SCOPES]));
+}
+
 const shopify = shopifyApp({
   apiKey: process.env.SHOPIFY_API_KEY,
   apiSecretKey: process.env.SHOPIFY_API_SECRET || "",
   apiVersion: ApiVersion.April26,
-  scopes: process.env.SCOPES?.split(","),
+  scopes: getShopifyScopes(),
   appUrl: process.env.SHOPIFY_APP_URL || "",
   authPathPrefix: "/auth",
   sessionStorage: new PrismaSessionStorage(prisma) as any,
@@ -25,7 +37,7 @@ const shopify = shopifyApp({
     "Pro Plan": {
       amount: 49.0,
       currencyCode: "USD",
-      interval: "Every30Days",
+      interval: BillingInterval.Every30Days as any,
     },
   },
   hooks: {

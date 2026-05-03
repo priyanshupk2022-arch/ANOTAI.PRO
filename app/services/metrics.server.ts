@@ -17,7 +17,7 @@ export async function getActivityMetrics(storeId: string, dateRange: string = "3
 
   return {
     customer_interactions_handled: interactions,
-    cart_recovery_drafts_created: tasks?.filter(t => t.task_type === "review_event" && t.result_summary?.includes("drafted")).length || 0,
+    cart_recovery_drafts_created: (tasks as any[])?.filter(t => t.task_type === "review_event" && t.result_summary?.includes("drafted")).length || 0,
     recovery_emails_sent: emailsSent,
     agent_tasks_completed: completedTasks,
     actions_executed: executedActions,
@@ -157,7 +157,7 @@ export async function getDepartmentActivityMetrics(storeId: string) {
   };
 
   tasks?.forEach(t => {
-    const dept = t.agents?.department;
+    const dept = (t as any).agents?.department;
     if (dept && depts[dept] !== undefined) {
       depts[dept]++;
     }

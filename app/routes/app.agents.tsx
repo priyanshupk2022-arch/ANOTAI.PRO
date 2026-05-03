@@ -1,65 +1,24 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
-import { authenticate } from "~/shopify.server";
+import { Form, useActionData, useLoaderData } from "@remix-run/react";
+import { AGENT_PROFILES, DEFAULT_OWNER_CONTROLS } from "~/agents/profiles";
+import type { AgentMode, AgentName } from "~/agents/profiles";
 import { getAgentStatuses } from "~/agents/orchestrator";
+import { updateAgentMode } from "~/services/agent-controls.server";
+import { authenticate } from "~/shopify.server";
 import { ensureStoreForSession } from "~/utils/store.server";
+import { AppSidebar } from "~/components/AppSidebar";
 import "~/styles/dashboard.css";
 
-const AGENT_INFO: Record<
-  string,
-  { description: string; howItWorks: string; promise: string }
-> = {
-  margin_guardian: {
-    description: "Protects every sale from margin leaks and unsafe discounts.",
-    howItWorks:
-      "Checks COGS and profit floor before discount, recovery, or bundle actions are allowed.",
-    promise: "No discount goes live unless profit is protected.",
-  },
-  personal_shopper: {
-    description: "Increases average order value with guided bundles and upsells.",
-    howItWorks:
-      "Reads catalog context, proposes bundles, and sends every offer through Margin Guardian.",
-    promise: "More revenue per visitor without random discounts.",
-  },
-  cart_sniper: {
-    description: "Recovers abandoned carts with controlled follow-up offers.",
-    howItWorks:
-      "Detects cart abandonment, waits for the right moment, then sends a margin-safe recovery offer.",
-    promise: "Bring back customers who were about to leave money behind.",
-  },
-  retention_engine: {
-    description: "Turns customer intent into repeat purchases.",
-    howItWorks:
-      "Captures searches and product interest, then prepares targeted return campaigns.",
-    promise: "Customers come back because the store remembers what they wanted.",
-  },
-  revenue_analyst: {
-    description: "Explains what the AI team did and what to do next.",
-    howItWorks:
-      "Summarizes recovered revenue, protected margin, agent actions, and next opportunities.",
-    promise: "The founder gets a clear daily operator report.",
-  },
-};
+type ActionResult = { success?: string; error?: string };
 
-const fallbackAgents = Object.keys(AGENT_INFO).map((name) => ({
-  name,
-  display_name:
-    name === "margin_guardian"
-      ? "Margin Guardian"
-      : name === "personal_shopper"
-        ? "AI Personal Shopper"
-        : name === "cart_sniper"
-          ? "Cart Sniper"
-          : name === "retention_engine"
-            ? "Retention Engine"
-            : "Revenue Analyst",
-  emoji: name
-    .split("_")
-    .map((part) => part[0]?.toUpperCase())
-    .join(""),
+const fallbackAgents = AGENT_PROFILES.map((profile) => ({
+  name: profile.name,
+  display_name: profile.displayName,
+  emoji: profile.initials,
   color: "#0F172A",
-  status: "active",
+  status: "active" as const,
+  mode: DEFAULT_OWNER_CONTROLS.agentModes[profile.name],
   today_actions: 0,
   revenue_impact: 0,
 }));
@@ -72,7 +31,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   });
 
   if (!store) {
-    return json({ agents: fallbackAgents });
+    return json({ agents: fallbackAgents, storeReady: false });
   }
 
   const agents = await getAgentStatuses(store.id).catch((error) => {
@@ -80,60 +39,81 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     return fallbackAgents;
   });
 
-  return json({ agents });
+  return json({ agents, storeReady: true });
+};
+
+export const action = async ({ request }: ActionFunctionArgs) => {
+  const { session } = await authenticate.admin(request);
+  const store = await ensureStoreForSession(session).catch((error) => {
+    console.warn("Agent mode update blocked:", error);
+    return null;
+  });
+
+  if (!store) {
+    return json<ActionResult>(
+      { error: "Store connection is not ready. Try again after database/tunnel is healthy." },
+      { status: 503 }
+    );
+  }
+
+  const formData = await request.formData();
+  const agentName = String(formData.get("agent_name") || "") as AgentName;
+  const mode = String(formData.get("mode") || "") as AgentMode;
+
+  if (!AGENT_PROFILES.some((profile) => profile.name === agentName)) {
+    return json<ActionResult>({ error: "Unknown agent." }, { status: 400 });
+  }
+
+  if (!["approval", "auto", "locked"].includes(mode)) {
+    return json<ActionResult>({ error: "Unknown agent mode." }, { status: 400 });
+  }
+
+  await updateAgentMode(store.id, agentName, mode);
+  const profile = AGENT_PROFILES.find((item) => item.name === agentName);
+
+  return json<ActionResult>({
+    success: `${profile?.displayName || "Agent"} is now in ${modeLabel(mode)} mode.`,
+  });
 };
 
 export default function AgentsPage() {
-  const { agents } = useLoaderData<typeof loader>();
+  const { agents, storeReady } = useLoaderData<typeof loader>();
+  const actionData = useActionData<typeof action>();
 
   return (
-    <div className="dashboard-layout animate-fade-in">
-      <nav className="sidebar">
-        <div className="sidebar-brand">ANOTAI</div>
-        <ul className="sidebar-nav">
-          <li><a className="sidebar-item" href="/app"><span className="sidebar-item-icon">📊</span> Dashboard</a></li>
-          <li><a className="sidebar-item" href="/app/cogs"><span className="sidebar-item-icon">💰</span> COGS Manager</a></li>
-          <li><a className="sidebar-item" href="/app/approvals"><span className="sidebar-item-icon">✅</span> Approvals</a></li>
-          <li><a className="sidebar-item active" href="/app/agents"><span className="sidebar-item-icon">🤖</span> AI Agents</a></li>
-          <li><a className="sidebar-item" href="/app/analytics"><span className="sidebar-item-icon">📈</span> Analytics</a></li>
-        </ul>
-        <div className="sidebar-divider" />
-        <div className="sidebar-label">System</div>
-        <ul className="sidebar-nav">
-          <li><a className="sidebar-item" href="/app/pixel"><span className="sidebar-item-icon">🛰️</span> Web Pixel</a></li>
-          <li><a className="sidebar-item" href="/app/settings"><span className="sidebar-item-icon">⚙️</span> Settings</a></li>
-        </ul>
-      </nav>
+    <div className="dashboard-layout">
+      <AppSidebar active="agents" />
 
       <main className="main-content">
         <div className="page-header">
           <h1 className="page-title">Your AI Revenue Team</h1>
           <p className="page-subtitle">
-            Five specialized agents working 24/7 to protect your margins and grow your revenue.
+            Configure how each specialized agent operates. Approval mode is recommended for beta stores.
           </p>
         </div>
 
+        {!storeReady && (
+          <div style={warningStyle}>
+            Controls are visible, but saving modes needs the database connection to be healthy.
+          </div>
+        )}
+        {actionData?.success && <div style={successStyle}>{actionData.success}</div>}
+        {actionData?.error && <div style={errorStyle}>{actionData.error}</div>}
+
         <div className="agents-grid">
-          {agents.map((agent: any) => {
-            const info = AGENT_INFO[agent.name] || {
-              description: "Revenue operations agent.",
-              howItWorks: "Works inside the ANOTAI operating system.",
-              promise: "Keeps the founder focused on growth.",
-            };
+          {agents.map((agent) => {
+            const profile = AGENT_PROFILES.find((item) => item.name === agent.name);
 
             return (
               <div className="agent-card-premium" key={agent.name}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
                   <div className="agent-icon-box" style={{ marginBottom: 0 }}>{agent.emoji}</div>
-                  <div className="badge badge-success">
-                    <span className="status-dot active" style={{ marginRight: '6px' }} />
-                    Active
-                  </div>
+                  <ModePill mode={agent.mode} />
                 </div>
 
                 <div style={{ marginBottom: '24px' }}>
                   <h3 style={{ fontSize: '18px', fontWeight: 800, color: 'var(--navy)', marginBottom: '4px' }}>{agent.display_name}</h3>
-                  <p style={{ fontSize: '13px', color: 'var(--gray-500)', lineHeight: '1.4' }}>{info.description}</p>
+                  <p style={{ fontSize: '13px', color: 'var(--gray-500)', lineHeight: '1.4' }}>{profile?.description}</p>
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '24px' }}>
@@ -147,14 +127,27 @@ export default function AgentsPage() {
                   </div>
                 </div>
 
-                <div style={{ borderTop: '1px solid var(--gray-100)', paddingTop: '16px' }}>
+                <div style={{ borderTop: '1px solid var(--gray-100)', paddingTop: '16px', marginBottom: '20px' }}>
                   <div style={{ fontSize: '12px', color: 'var(--gray-600)', marginBottom: '8px' }}>
-                    <strong style={{ color: 'var(--navy)' }}>How it works:</strong> {info.howItWorks}
+                    <strong style={{ color: 'var(--navy)' }}>Mission:</strong> {profile?.mission}
                   </div>
                   <div style={{ fontSize: '12px', color: 'var(--gray-600)' }}>
-                    <strong style={{ color: 'var(--navy)' }}>Promise:</strong> {info.promise}
+                    <strong style={{ color: 'var(--navy)' }}>Safety:</strong> {profile?.approvalRequired}
                   </div>
                 </div>
+
+                <Form method="post" style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
+                  <input type="hidden" name="agent_name" value={agent.name} />
+                  <div style={{ flex: 1 }}>
+                    <label style={{ fontSize: '11px', fontWeight: 700, color: 'var(--gray-400)', textTransform: 'uppercase', marginBottom: '4px', display: 'block' }}>Owner Mode</label>
+                    <select name="mode" defaultValue={agent.mode} className="form-input" style={{ fontSize: '13px', height: '38px' }}>
+                      <option value="approval">Approval Mode</option>
+                      <option value="auto">Auto Mode</option>
+                      <option value="locked">Locked</option>
+                    </select>
+                  </div>
+                  <button type="submit" className="btn-primary" style={{ height: '38px', padding: '0 12px', fontSize: '12px' }}>Save</button>
+                </Form>
               </div>
             );
           })}
@@ -163,3 +156,54 @@ export default function AgentsPage() {
     </div>
   );
 }
+
+function ModePill({ mode }: { mode: AgentMode }) {
+  const stylesByMode: Record<AgentMode, React.CSSProperties> = {
+    approval: { background: "#FEF3C7", color: "#92400E" },
+    auto: { background: "#DCFCE7", color: "#166534" },
+    locked: { background: "#F1F5F9", color: "#475569" },
+  };
+
+  return (
+    <div className="badge" style={{ ...stylesByMode[mode], padding: '4px 10px' }}>
+      <span className="status-dot active" style={{ backgroundColor: 'currentColor', marginRight: '6px' }} />
+      {modeLabel(mode)}
+    </div>
+  );
+}
+
+function modeLabel(mode: AgentMode) {
+  if (mode === "auto") return "Auto";
+  if (mode === "locked") return "Locked";
+  return "Approval";
+}
+
+const successStyle: React.CSSProperties = {
+  background: "#DCFCE7",
+  color: "#166534",
+  padding: "12px 16px",
+  borderRadius: 8,
+  marginBottom: 24,
+  fontSize: 14,
+  fontWeight: 700,
+};
+
+const errorStyle: React.CSSProperties = {
+  background: "#FEE2E2",
+  color: "#991B1B",
+  padding: "12px 16px",
+  borderRadius: 8,
+  marginBottom: 24,
+  fontSize: 14,
+  fontWeight: 700,
+};
+
+const warningStyle: React.CSSProperties = {
+  background: "#FEF3C7",
+  color: "#92400E",
+  padding: "12px 16px",
+  borderRadius: 8,
+  marginBottom: 24,
+  fontSize: 14,
+  fontWeight: 700,
+};

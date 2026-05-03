@@ -1,6 +1,6 @@
 import { supabase } from "~/utils/supabase.server";
 
-const STORE_SYNC_TIMEOUT_MS = 2500;
+const STORE_SYNC_TIMEOUT_MS = 15000;
 
 type ShopifySessionLike = {
   shop: string;

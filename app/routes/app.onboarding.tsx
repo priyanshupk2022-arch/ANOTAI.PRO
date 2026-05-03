@@ -1,174 +1,252 @@
-import { useState } from "react";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
-import { Form, useActionData, useLoaderData, useNavigation } from "@remix-run/react";
+import type { LoaderFunctionArgs } from "@remix-run/node";
+import { json } from "@remix-run/node";
+import { Link, useLoaderData } from "@remix-run/react";
+import { getBetaReadiness } from "~/services/beta-readiness.server";
+import type { BetaReadinessItem } from "~/services/beta-readiness.server";
 import { authenticate } from "~/shopify.server";
-import { supabase } from "~/utils/supabase.server";
 import { ensureStoreForSession } from "~/utils/store.server";
+import { AppSidebar } from "~/components/AppSidebar";
 import "~/styles/dashboard.css";
+
+const pilotSteps = [
+  "Install app on the Shopify store.",
+  "Keep agents in approval-first mode.",
+  "Add COGS for top products.",
+  "Install customer signal pixel.",
+  "Review dashboard, approvals, and worker health daily.",
+  "Collect merchant feedback before enabling stronger automation.",
+];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
-  const store = await ensureStoreForSession(session);
-  
-  // If already onboarded, redirect to dashboard (optional check)
-  // if (store.settings?.onboarded) return redirect("/app");
+  const store = await ensureStoreForSession(session).catch((error) => {
+    console.warn("Onboarding store sync fallback used:", error);
+    return null;
+  });
 
-  return json({ storeId: store.id });
-};
+  if (!store) {
+    return json({
+      shop: session.shop,
+      readiness: {
+        readyCount: 0,
+        totalCount: 0,
+        items: [],
+      },
+      storeReady: false,
+    });
+  }
 
-export const action = async ({ request }: ActionFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
-  const formData = await request.formData();
-  
-  const settings = {
-    niche: formData.get("niche"),
-    brand_voice: formData.get("brand_voice"),
-    max_discount: Number(formData.get("max_discount")),
-    margin_target: Number(formData.get("margin_target")),
-    autonomy_mode: formData.get("autonomy_mode"),
-    email_limit: Number(formData.get("email_limit")),
-    bestseller_categories: formData.get("categories")?.toString().split(",").map(s => s.trim()),
-    onboarded: true
-  };
+  const readiness = await getBetaReadiness(store.id).catch((error) => {
+    console.warn("Beta readiness fallback used:", error);
+    return {
+      readyCount: 0,
+      totalCount: 0,
+      items: [],
+    };
+  });
 
-  const { error } = await supabase.from("stores")
-    .update({ settings })
-    .eq("shop_domain", session.shop);
-
-  if (error) return json({ error: "Failed to save settings" }, { status: 500 });
-  return redirect("/app");
+  return json({
+    shop: session.shop,
+    readiness,
+    storeReady: true,
+  });
 };
 
 export default function OnboardingPage() {
-  const [step, setStep] = useState(1);
-  const { storeId } = useLoaderData<typeof loader>();
-  const actionData = useActionData<typeof action>();
-  const nav = useNavigation();
-
-  const next = () => setStep(s => s + 1);
-  const prev = () => setStep(s => s - 1);
+  const { shop, readiness, storeReady } = useLoaderData<typeof loader>();
+  const score = readiness.totalCount
+    ? Math.round((readiness.readyCount / readiness.totalCount) * 100)
+    : 0;
+  const readinessItems = readiness.items.filter(
+    (item): item is BetaReadinessItem => Boolean(item)
+  );
 
   return (
-    <div className="dashboard-layout animate-fade-in" style={{ justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
-      <div className="card" style={{ maxWidth: '600px', width: '100%', padding: '40px' }}>
-        <div style={{ textAlign: 'center', marginBottom: '32px' }}>
-          <h1 className="page-title" style={{ fontSize: '28px' }}>Setup Your AI Playbook</h1>
-          <p className="page-subtitle">Let's train your AI agents on your brand's unique voice and rules.</p>
+    <div className="dashboard-layout">
+      <AppSidebar active="onboarding" />
+
+      <main className="main-content">
+        <div className="page-header">
+          <div>
+            <h1 className="page-title">Beta Onboarding</h1>
+            <p className="page-subtitle">
+              Prepare {shop} for a paid private beta without turning on risky automation too early.
+            </p>
+          </div>
+          <span className="beta-pill">{score}% Ready</span>
         </div>
 
-        <div style={{ marginBottom: '32px' }}>
-          <div style={{ height: '4px', background: '#F1F5F9', borderRadius: '2px' }}>
-            <div style={{ height: '100%', width: `${(step / 4) * 100}%`, background: 'var(--primary)', transition: 'width 0.3s ease', borderRadius: '2px' }} />
+        {!storeReady && (
+          <div style={warningStyle}>
+            Store sync is not ready. Refresh after database/tunnel connection is healthy.
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', fontSize: '12px', fontWeight: 700, color: 'var(--gray-400)' }}>
-            <span>Step {step} of 4</span>
-            <span>{step === 4 ? 'Finalizing' : 'Keep going!'}</span>
+        )}
+
+        <div className="card">
+          <div style={heroRowStyle}>
+            <div>
+              <span style={eyebrowStyle}>Private beta rule</span>
+              <h2 style={heroTitleStyle}>Approval-first launch</h2>
+              <p style={heroTextStyle}>
+                The app can show value to merchants now, while emails, discounts, and high-impact actions
+                stay controlled by the owner until the pilot is stable.
+              </p>
+            </div>
+            <Link to="/app/approvals" className="btn-primary">Open Approvals</Link>
           </div>
         </div>
 
-        <Form method="post">
-          {step === 1 && (
-            <div className="animate-fade-in">
-              <h2 className="section-title">Store Identity</h2>
-              <div style={{ display: 'grid', gap: '20px' }}>
-                <div>
-                  <label style={labelStyle}>What is your niche?</label>
-                  <select name="niche" className="form-input" required>
-                    <option value="skincare">Skincare</option>
-                    <option value="haircare">Haircare</option>
-                    <option value="cosmetics">Cosmetics</option>
-                    <option value="wellness">Wellness</option>
-                  </select>
-                </div>
-                <div>
-                  <label style={labelStyle}>Brand Voice</label>
-                  <select name="brand_voice" className="form-input" required>
-                    <option value="professional">Professional & Scientific</option>
-                    <option value="friendly">Friendly & Relatable</option>
-                    <option value="playful">Playful & Bold</option>
-                    <option value="luxury">Luxury & Minimalist</option>
-                  </select>
-                </div>
-                <button type="button" onClick={next} className="btn-primary" style={{ width: '100%' }}>Continue</button>
-              </div>
+        <div className="ops-grid">
+          <div className="card">
+            <div className="ops-card-header" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
+              <span style={{ fontWeight: 800 }}>Readiness Checklist</span>
+              <strong style={{ fontSize: '13px', color: 'var(--primary)' }}>{readiness.readyCount}/{readiness.totalCount}</strong>
             </div>
-          )}
+            <div style={readinessListStyle}>
+              {readinessItems.map((item) => (
+                <Link to={item.href || "/app/onboarding"} key={item.key} style={readinessItemStyle}>
+                  <div className={`status-dot ${item.status === 'ready' ? 'active' : item.status === 'manual' ? 'warning' : 'red'}`} />
+                  <div>
+                    <strong style={{ display: 'block', fontSize: '13px', color: 'var(--navy)', marginBottom: '4px' }}>{item.title}</strong>
+                    <p style={{ fontSize: '12px', color: 'var(--gray-500)', lineHeight: 1.4 }}>{item.detail}</p>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </div>
 
-          {step === 2 && (
-            <div className="animate-fade-in">
-              <h2 className="section-title">Safety & Profit Floors</h2>
-              <div style={{ display: 'grid', gap: '20px' }}>
-                <div>
-                  <label style={labelStyle}>Max Discount AI can offer (%)</label>
-                  <input name="max_discount" type="number" defaultValue="20" className="form-input" required />
-                </div>
-                <div>
-                  <label style={labelStyle}>Target Margin Floor (%)</label>
-                  <input name="margin_target" type="number" defaultValue="30" className="form-input" required />
-                </div>
-                <div style={{ display: 'flex', gap: '12px' }}>
-                  <button type="button" onClick={prev} className="btn-primary" style={{ background: 'var(--gray-100)', color: 'var(--navy)', flex: 1 }}>Back</button>
-                  <button type="button" onClick={next} className="btn-primary" style={{ flex: 2 }}>Next Step</button>
-                </div>
-              </div>
+          <div className="card">
+            <div className="ops-card-header" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
+              <span style={{ fontWeight: 800 }}>Pilot Playbook</span>
+              <strong style={{ fontSize: '11px', color: 'var(--gray-400)', textTransform: 'uppercase' }}>10 stores max</strong>
             </div>
-          )}
+            <div style={playbookStyle}>
+              {pilotSteps.map((step, index) => (
+                <div style={playbookStepStyle} key={step}>
+                  <span style={stepNumberStyle}>{index + 1}</span>
+                  <p>{step}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
 
-          {step === 3 && (
-            <div className="animate-fade-in">
-              <h2 className="section-title">Agent Operations</h2>
-              <div style={{ display: 'grid', gap: '20px' }}>
-                <div>
-                  <label style={labelStyle}>Autonomy Mode</label>
-                  <select name="autonomy_mode" className="form-input" required>
-                    <option value="approval_first">Approval First (Recommended)</option>
-                    <option value="semi_auto">Semi-Autonomous</option>
-                    <option value="full_auto">Fully Autonomous</option>
-                  </select>
-                </div>
-                <div>
-                  <label style={labelStyle}>Max Recovery Emails (per week/user)</label>
-                  <input name="email_limit" type="number" defaultValue="3" className="form-input" required />
-                </div>
-                <div style={{ display: 'flex', gap: '12px' }}>
-                  <button type="button" onClick={prev} className="btn-primary" style={{ background: 'var(--gray-100)', color: 'var(--navy)', flex: 1 }}>Back</button>
-                  <button type="button" onClick={next} className="btn-primary" style={{ flex: 2 }}>Next Step</button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {step === 4 && (
-            <div className="animate-fade-in">
-              <h2 className="section-title">Product Focus</h2>
-              <div style={{ display: 'grid', gap: '20px' }}>
-                <div>
-                  <label style={labelStyle}>Bestseller Categories (comma separated)</label>
-                  <input name="categories" placeholder="Serums, Cleansers, Sunscreen" className="form-input" required />
-                </div>
-                <p style={{ fontSize: '13px', color: 'var(--gray-500)', textAlign: 'center' }}>
-                  By clicking Launch, you agree to allow AI agents to interact with customers based on these safety zones.
-                </p>
-                <div style={{ display: 'flex', gap: '12px' }}>
-                  <button type="button" onClick={prev} className="btn-primary" style={{ background: 'var(--gray-100)', color: 'var(--navy)', flex: 1 }}>Back</button>
-                  <button type="submit" className="btn-primary" style={{ flex: 2 }} disabled={nav.state !== "idle"}>
-                    {nav.state !== "idle" ? "Launching..." : "Launch AI Playbook"}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-        </Form>
-      </div>
+        <div className="card">
+          <h2 className="section-title">Founder Beta Promise</h2>
+          <div style={promiseGridStyle}>
+            <PromiseCard title="What they get" text="A 5-agent AI revenue team, founder onboarding, weekly reports, and approval-first revenue opportunities." />
+            <PromiseCard title="What stays controlled" text="No unlimited AI, no hidden customer emails, no unsafe discounts, and no risky campaigns during beta." />
+            <PromiseCard title="What to measure" text="Recovered revenue, margin risks blocked, customer signals captured, and merchant feedback." />
+          </div>
+        </div>
+      </main>
     </div>
   );
 }
 
-const labelStyle: React.CSSProperties = {
-  display: 'block',
-  fontSize: '13px',
+function PromiseCard({ title, text }: { title: string; text: string }) {
+  return (
+    <div style={promiseCardStyle}>
+      <strong style={{ display: 'block', marginBottom: '8px', color: 'var(--navy)' }}>{title}</strong>
+      <p style={{ margin: 0, fontSize: '12px', color: 'var(--gray-500)', lineHeight: 1.5 }}>{text}</p>
+    </div>
+  );
+}
+
+const warningStyle: React.CSSProperties = {
+  background: "#FEF3C7",
+  color: "#92400E",
+  padding: "12px 16px",
+  borderRadius: 8,
+  marginBottom: 24,
+  fontSize: 14,
   fontWeight: 700,
-  color: 'var(--navy)',
-  marginBottom: '8px'
+};
+
+const heroRowStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 20,
+  alignItems: "center",
+};
+
+const eyebrowStyle: React.CSSProperties = {
+  color: "#166534",
+  fontSize: 11,
+  fontWeight: 900,
+  letterSpacing: 0.8,
+  textTransform: "uppercase",
+};
+
+const heroTitleStyle: React.CSSProperties = {
+  margin: "4px 0 8px",
+  color: "var(--navy)",
+  fontSize: 28,
+  lineHeight: 1.1,
+  fontWeight: 800,
+};
+
+const heroTextStyle: React.CSSProperties = {
+  margin: 0,
+  color: "var(--gray-500)",
+  fontSize: 14,
+  lineHeight: 1.55,
+  maxWidth: 620,
+};
+
+const readinessListStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 12,
+};
+
+const readinessItemStyle: React.CSSProperties = {
+  display: "flex",
+  gap: 16,
+  alignItems: "flex-start",
+  padding: '16px',
+  borderRadius: 12,
+  background: "var(--gray-50)",
+  border: "1px solid var(--gray-100)",
+  textDecoration: "none",
+  transition: 'all 0.2s ease',
+};
+
+const playbookStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 16,
+};
+
+const playbookStepStyle: React.CSSProperties = {
+  display: "flex",
+  gap: 14,
+  alignItems: "flex-start",
+  color: "var(--navy)",
+  fontSize: 13,
+  lineHeight: 1.45,
+};
+
+const stepNumberStyle: React.CSSProperties = {
+  display: "grid",
+  placeItems: "center",
+  width: 26,
+  height: 26,
+  borderRadius: 8,
+  background: "#DCFCE7",
+  color: "#166534",
+  fontSize: 12,
+  fontWeight: 900,
+  flexShrink: 0,
+};
+
+const promiseGridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+  gap: 16,
+};
+
+const promiseCardStyle: React.CSSProperties = {
+  border: "1px solid var(--gray-100)",
+  borderRadius: 12,
+  background: "var(--gray-50)",
+  padding: 16,
 };

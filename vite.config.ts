@@ -40,7 +40,7 @@ if (host === "localhost") {
 export default defineConfig({
   server: {
     host: "127.0.0.1",
-    allowedHosts: [host, ".serveousercontent.com", ".loca.lt"],
+    allowedHosts: [host, ".serveousercontent.com", ".loca.lt", ".trycloudflare.com", ".lhr.life"],
     cors: {
       preflightContinue: true,
     },

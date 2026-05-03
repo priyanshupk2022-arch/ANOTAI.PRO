@@ -12,6 +12,8 @@
     "start": "remix-serve ./build/server/index.js",
     "docker-start": "npm run setup && npm run start",
     "setup": "prisma generate && prisma migrate deploy",
+    "smoke:public": "node scripts/smoke-public.mjs",
+    "smoke:live": "node scripts/smoke-live-readiness.mjs",
     "lint": "eslint --cache --cache-location ./node_modules/.cache/eslint .",
     "shopify": "shopify",
     "prisma": "prisma",

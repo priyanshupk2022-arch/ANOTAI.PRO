@@ -4,26 +4,29 @@ import { Form, useActionData, useLoaderData } from "@remix-run/react";
 import { bulkImportCOGS, getAllCOGS, upsertCOGS } from "~/agents/margin-guardian";
 import { authenticate } from "~/shopify.server";
 import { ensureStoreForSession } from "~/utils/store.server";
+import { AppSidebar } from "~/components/AppSidebar";
 import "~/styles/dashboard.css";
 
 type ActionResult = { success?: string; error?: string };
 
 function parseCsvRows(csvText: string) {
-  return csvText
+  const rows = csvText
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean)
-    .slice(1)
-    .map((line) => {
-      const [product_id, variant_id, product_title, cogsValue] = line
-        .split(",")
-        .map((value) => value.trim());
+    .map(parseCsvLine)
+    .filter((row) => row.some(Boolean));
+
+  const dataRows = hasCsvHeader(rows[0]) ? rows.slice(1) : rows;
+  const validRows = dataRows
+    .map(([product_id, variant_id, product_title, cogsValue]) => {
+      const cogs = Number(String(cogsValue || "").replace(/[$,]/g, ""));
 
       return {
-        product_id,
-        variant_id,
-        product_title,
-        cogs: Number(cogsValue),
+        product_id: String(product_id || "").trim(),
+        variant_id: String(variant_id || "").trim(),
+        product_title: String(product_title || "").trim(),
+        cogs,
       };
     })
     .filter(
@@ -34,6 +37,54 @@ function parseCsvRows(csvText: string) {
         Number.isFinite(row.cogs) &&
         row.cogs > 0
     );
+
+  return {
+    rows: validRows,
+    skipped: dataRows.length - validRows.length,
+  };
+}
+
+function parseCsvLine(line: string) {
+  const values: string[] = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    const nextChar = line[index + 1];
+
+    if (char === "\"") {
+      if (inQuotes && nextChar === "\"") {
+        current += "\"";
+        index += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (char === "," && !inQuotes) {
+      values.push(current.trim());
+      current = "";
+      continue;
+    }
+
+    current += char;
+  }
+
+  values.push(current.trim());
+  return values;
+}
+
+function hasCsvHeader(row: string[] | undefined) {
+  if (!row) return false;
+  const normalized = row.map((value) => value.toLowerCase().replace(/[\s_-]/g, ""));
+  return (
+    normalized.includes("productid") &&
+    normalized.includes("variantid") &&
+    (normalized.includes("producttitle") || normalized.includes("productname")) &&
+    normalized.includes("cogs")
+  );
 }
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -101,18 +152,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (intent === "bulk_csv") {
     const csvText = String(formData.get("csv_data") || "");
-    const rows = parseCsvRows(csvText);
+    const parsed = parseCsvRows(csvText);
 
-    if (rows.length === 0) {
+    if (parsed.rows.length === 0) {
       return json<ActionResult>(
         { error: "No valid CSV rows found. Use: product_id, variant_id, product_title, cogs" },
         { status: 400 }
       );
     }
 
-    const result = await bulkImportCOGS(store.id, rows);
+    const result = await bulkImportCOGS(store.id, parsed.rows);
     return json<ActionResult>({
-      success: `Imported ${result.imported} products. ${result.errors} rows failed.`,
+      success: `Imported ${result.imported} products. ${result.errors + parsed.skipped} rows skipped or failed.`,
     });
   }
 
@@ -124,29 +175,14 @@ export default function COGSManager() {
   const actionData = useActionData<typeof action>();
 
   return (
-    <div className="dashboard-layout animate-fade-in">
-      <nav className="sidebar">
-        <div className="sidebar-brand">ANOTAI</div>
-        <ul className="sidebar-nav">
-          <li><a className="sidebar-item" href="/app"><span className="sidebar-item-icon">📊</span> Dashboard</a></li>
-          <li><a className="sidebar-item active" href="/app/cogs"><span className="sidebar-item-icon">💰</span> COGS Manager</a></li>
-          <li><a className="sidebar-item" href="/app/approvals"><span className="sidebar-item-icon">✅</span> Approvals</a></li>
-          <li><a className="sidebar-item" href="/app/agents"><span className="sidebar-item-icon">🤖</span> AI Agents</a></li>
-          <li><a className="sidebar-item" href="/app/analytics"><span className="sidebar-item-icon">📈</span> Analytics</a></li>
-        </ul>
-        <div className="sidebar-divider" />
-        <div className="sidebar-label">System</div>
-        <ul className="sidebar-nav">
-          <li><a className="sidebar-item" href="/app/pixel"><span className="sidebar-item-icon">🛰️</span> Web Pixel</a></li>
-          <li><a className="sidebar-item" href="/app/settings"><span className="sidebar-item-icon">⚙️</span> Settings</a></li>
-        </ul>
-      </nav>
+    <div className="dashboard-layout">
+      <AppSidebar active="cogs" />
 
       <main className="main-content">
         <div className="page-header">
           <h1 className="page-title">COGS Manager</h1>
           <p className="page-subtitle">
-            Input your product costs. Margin Guardian uses this to block unsafe discounts and protect your profit.
+            Add product costs so Margin Guardian can block unsafe discounts and recovery offers.
           </p>
         </div>
 
@@ -168,7 +204,7 @@ export default function COGSManager() {
                 <input name="product_id" placeholder="Product ID" required className="form-input" />
                 <input name="variant_id" placeholder="Variant ID" required className="form-input" />
               </div>
-              <input name="product_title" placeholder="Product Name (e.g. Classic White Tee)" required className="form-input" />
+              <input name="product_title" placeholder="Product Name" required className="form-input" />
               <div style={{ display: 'flex', gap: '12px' }}>
                 <input name="cogs" type="number" step="0.01" min="0.01" placeholder="Cost (USD)" required className="form-input" style={{ flex: 1 }} />
                 <button type="submit" className="btn-primary">Save Cost</button>

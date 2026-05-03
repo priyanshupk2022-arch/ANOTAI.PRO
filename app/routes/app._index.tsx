@@ -1,223 +1,516 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import { Form, Link, useLoaderData } from "@remix-run/react";
+import { createClient } from "@supabase/supabase-js";
+import { useEffect, useMemo, useState } from "react";
 import { authenticate } from "~/shopify.server";
+import { getDashboardOverview, getActivityFeed } from "~/agents/orchestrator";
+import { getPendingApprovalCount } from "~/services/agent-controls.server";
+import { checkBillingStatus } from "~/services/billing.server";
+import { getBetaReadiness } from "~/services/beta-readiness.server";
+import { getCustomerSignalSummary } from "~/services/customer-data.server";
+import { getJobQueueHealth } from "~/services/job-queue.server";
+import { supabase } from "~/utils/supabase.server";
 import { ensureStoreForSession } from "~/utils/store.server";
-import { 
-  getActivityMetrics, 
-  getOpportunityPipelineMetrics, 
-  getMarginRiskMetrics, 
-  getNextBestActions, 
-  getActivationScore 
-} from "~/services/metrics.server";
+import { AppSidebar } from "~/components/AppSidebar";
 import "~/styles/dashboard.css";
 
+const DASHBOARD_DATA_TIMEOUT_MS = 15000;
+
+function getFallbackOverview() {
+  return {
+    agents: [
+      {
+        name: "margin_guardian",
+        display_name: "Margin Guardian",
+        emoji: "MG",
+        color: "#10B981",
+        status: "active",
+        today_actions: 0,
+        revenue_impact: 0,
+      },
+      {
+        name: "personal_shopper",
+        display_name: "AI Personal Shopper",
+        emoji: "AI",
+        color: "#8B5CF6",
+        status: "active",
+        today_actions: 0,
+        revenue_impact: 0,
+      },
+      {
+        name: "cart_sniper",
+        display_name: "Cart Sniper",
+        emoji: "CS",
+        color: "#F59E0B",
+        status: "active",
+        today_actions: 0,
+        revenue_impact: 0,
+      },
+      {
+        name: "retention_engine",
+        display_name: "Retention Engine",
+        emoji: "RE",
+        color: "#EC4899",
+        status: "active",
+        today_actions: 0,
+        revenue_impact: 0,
+      },
+      {
+        name: "revenue_analyst",
+        display_name: "Revenue Analyst",
+        emoji: "RA",
+        color: "#0F172A",
+        status: "active",
+        today_actions: 0,
+        revenue_impact: 0,
+      },
+    ],
+    metrics: {
+      total_revenue_impact: 0,
+      revenue_recovered: 0,
+      aov_increase_pct: 0,
+      intents_captured: 0,
+      vip_emails_sent: 0,
+      margin_loss: 0,
+    },
+  };
+}
+
+function getFallbackCustomerSignals() {
+  return {
+    customers: 0,
+    searches7d: 0,
+    abandonedCarts7d: 0,
+    recoveredCarts7d: 0,
+    emailsSent7d: 0,
+  };
+}
+
+function getFallbackQueueHealth() {
+  return {
+    pending: 0,
+    processing: 0,
+    failed: 0,
+    completedToday: 0,
+    status: "Healthy",
+  };
+}
+
+async function withDashboardTimeout<T>(operation: Promise<T>) {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error("Dashboard data timed out")),
+          DASHBOARD_DATA_TIMEOUT_MS
+        );
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
-  const store = await ensureStoreForSession(session);
+  const { admin, session } = await authenticate.admin(request);
+  const url = new URL(request.url);
+  const store = await ensureStoreForSession(session).catch((error) => {
+    console.warn("Dashboard store sync skipped:", error);
+    return null;
+  });
 
   if (!store) {
     return json({
-      activity: null,
-      pipeline: null,
-      risks: null,
-      nextActions: [],
-      activation: null,
+      overview: getFallbackOverview(),
+      activity: [],
+      inventory: [],
+      pendingApprovals: 0,
+      customerSignals: getFallbackCustomerSignals(),
+      queueHealth: getFallbackQueueHealth(),
+      billingActive: false,
+      readiness: { readyCount: 0, totalCount: 0, items: [] },
+      demoStatus: url.searchParams.get("demo"),
+      storeId: null,
+      realtime: {
+        url: process.env.SUPABASE_URL || null,
+        anonKey: process.env.SUPABASE_ANON_KEY || null,
+      },
     });
   }
 
-  const [activity, pipeline, risks, nextActions, activation] = await Promise.all([
-    getActivityMetrics(store.id),
-    getOpportunityPipelineMetrics(store.id),
-    getMarginRiskMetrics(store.id),
-    getNextBestActions(store.id),
-    getActivationScore(store.id),
-  ]);
+  let overview: any = getFallbackOverview();
+  let activity: any[] = [];
+  let pendingApprovals = 0;
+  let customerSignals = getFallbackCustomerSignals();
+  let queueHealth = getFallbackQueueHealth();
+  let billingActive = store.plan_status === "active";
+  let readiness = { readyCount: 0, totalCount: 0, items: [] as any[] };
+
+  try {
+    const billing = await checkBillingStatus(admin);
+    billingActive = billing.active;
+
+    if (billing.active && store.plan_status !== "active") {
+      await supabase
+        .from("stores")
+        .update({
+          plan_status: "active",
+          billing_id: billing.subscription_id || null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", store.id);
+    }
+  } catch (error) {
+    console.warn("Dashboard billing check fallback used:", error);
+  }
+
+  try {
+    const dashboardData = await withDashboardTimeout(
+      Promise.all([
+        getDashboardOverview(store.id),
+        getActivityFeed(store.id, 15),
+        getPendingApprovalCount(store.id),
+        getCustomerSignalSummary(store.id),
+        getJobQueueHealth(store.id),
+      ]) as Promise<
+        [any, any[], number, any, any]
+      >
+    );
+    overview = dashboardData[0] || overview;
+    activity = Array.isArray(dashboardData[1]) ? dashboardData[1] : [];
+    pendingApprovals = dashboardData[2] || 0;
+    customerSignals = dashboardData[3] || customerSignals;
+    queueHealth = dashboardData[4] || queueHealth;
+  } catch (error) {
+    console.warn("Dashboard data fallback used:", error);
+  }
+
+  readiness = await getBetaReadiness(store.id).catch((error) => {
+    console.warn("Dashboard readiness fallback used:", error);
+    return readiness;
+  });
+
+  const inventory = [
+    { name: "Classic White Tee", stock: 142, maxStock: 200 },
+    { name: "Leather Weekender Bag", stock: 8, maxStock: 100 },
+    { name: "Running Shoes Pro", stock: 45, maxStock: 150 },
+    { name: "Organic Face Cream", stock: 3, maxStock: 50 },
+    { name: "Wireless Earbuds", stock: 67, maxStock: 200 },
+  ];
 
   return json({
+    overview,
     activity,
-    pipeline,
-    risks,
-    nextActions,
-    activation,
+    inventory,
+    pendingApprovals,
+    customerSignals,
+    queueHealth,
+    billingActive,
+    readiness,
+    demoStatus: url.searchParams.get("demo"),
+    storeId: store.id,
+    realtime: {
+      url: process.env.SUPABASE_URL || null,
+      anonKey: process.env.SUPABASE_ANON_KEY || null,
+    },
   });
 };
 
 export default function Dashboard() {
-  const { activity, pipeline, risks, nextActions, activation } = useLoaderData<typeof loader>();
+  const { overview, activity, inventory, pendingApprovals, customerSignals, queueHealth, billingActive, readiness, demoStatus, storeId, realtime } =
+    useLoaderData<typeof loader>();
+  const [netProfit, setNetProfit] = useState(overview?.metrics?.total_revenue_impact || 0);
+  const [isFlashing, setIsFlashing] = useState(false);
+  const [feedItems, setFeedItems] = useState(activity || []);
+  const realtimeSupabase = useMemo(() => {
+    if (!realtime.url || !realtime.anonKey) return null;
 
-  const fmtCurrency = (n: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 0 }).format(n);
+    return createClient(realtime.url, realtime.anonKey);
+  }, [realtime.url, realtime.anonKey]);
+
+  // Supabase Realtime: Listen for new agent actions
+  useEffect(() => {
+    if (!storeId || !realtimeSupabase) return;
+
+    const channel = realtimeSupabase
+      .channel("realtime-actions")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "agent_actions", filter: `store_id=eq.${storeId}` },
+        (payload: any) => {
+          const action = payload.new;
+          if (action.revenue_impact > 0) {
+            setNetProfit((prev: number) => prev + action.revenue_impact);
+            setIsFlashing(true);
+            setTimeout(() => setIsFlashing(false), 1000);
+          }
+          setFeedItems((prev: any[]) => [
+            { id: action.id, agent: action.agent_name, type: action.action_type, payload: action.payload, revenue: action.revenue_impact, time: action.created_at },
+            ...prev.slice(0, 14),
+          ]);
+        }
+      ).subscribe();
+    return () => { realtimeSupabase.removeChannel(channel); };
+  }, [realtimeSupabase, storeId]);
+
+  const fmt = (n: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 0 }).format(n);
+  const timeAgo = (d: string) => { const m = Math.floor((Date.now() - new Date(d).getTime()) / 60000); if (m < 1) return "Just now"; if (m < 60) return `${m}m ago`; const h = Math.floor(m / 60); if (h < 24) return `${h}h ago`; return `${Math.floor(h / 24)}d ago`; };
+  const toPlain = (a: any) => {
+    const p = a.payload || {};
+    switch (a.type) {
+      case "cart_recovered": return { dot: "", amt: fmt(a.revenue || 0), text: "Order recovered" };
+      case "bundle_accepted": return { dot: "purple", amt: fmt(a.revenue || 0), text: `Bundle accepted` };
+      case "discount_blocked": return { dot: "red", amt: "", text: `Guardian blocked ${p.requested_discount_pct||0}% discount` };
+      case "recovery_sent": return { dot: "amber", amt: "", text: `Recovery email sent (${p.discount_pct||0}% off)` };
+      case "vip_drop_executed": return { dot: "purple", amt: "", text: `VIP drop: ${p.emails_sent||0} emails for "${p.product_title||"product"}"` };
+      case "search_captured": return { dot: "", amt: "", text: `Search tracked: "${p.query||""}"` };
+      default: return { dot: "", amt: "", text: a.type.replace(/_/g, " ") };
+    }
+  };
+  const battPct = (s: number, m: number) => Math.round((s / m) * 100);
+  const battCls = (p: number) => p <= 10 ? "critical" : p <= 30 ? "low" : "";
 
   return (
-    <div className="dashboard-layout animate-fade-in">
-      <nav className="sidebar">
-        <div className="sidebar-brand">ANOTAI</div>
-        <ul className="sidebar-nav">
-          <li><a className="sidebar-item active" href="/app"><span className="sidebar-item-icon">📊</span> Dashboard</a></li>
-          <li><a className="sidebar-item" href="/app/queue"><span className="sidebar-item-icon">⚡</span> Action Queue</a></li>
-          <li><a className="sidebar-item" href="/app/debate"><span className="sidebar-item-icon">🗣️</span> War Room</a></li>
-          <li><a className="sidebar-item" href="/app/ai-team"><span className="sidebar-item-icon">🤖</span> AI Team</a></li>
-          <li><a className="sidebar-item" href="/app/usage"><span className="sidebar-item-icon">📈</span> Usage</a></li>
-        </ul>
-        <div className="sidebar-divider" />
-        <div className="sidebar-label">System</div>
-        <ul className="sidebar-nav">
-          <li><a className="sidebar-item" href="/app/billing"><span className="sidebar-item-icon">💳</span> Billing</a></li>
-          <li><a className="sidebar-item" href="/app/settings"><span className="sidebar-item-icon">⚙️</span> Settings</a></li>
-        </ul>
-      </nav>
+    <div className="dashboard-layout">
+      <AppSidebar active="dashboard" />
 
       <main className="main-content">
         <div className="page-header">
-          <h1 className="page-title">Value Activity & Opportunity Pipeline</h1>
-          <p className="page-subtitle">ANOTAI is active, protecting your margins, and detecting growth opportunities 24/7.</p>
+          <div>
+            <h1 className="page-title">Beta Command Center</h1>
+            <p className="page-subtitle">Track agents, approvals, customer signals, and background work before going fully autonomous.</p>
+          </div>
+          <span className="beta-pill">Founder Beta</span>
         </div>
 
-        {/* TOP METRICS GRID */}
-        <div className="agents-grid" style={{ marginBottom: '40px' }}>
-          <div className="card" style={{ padding: '24px', borderTop: '4px solid var(--primary)' }}>
-            <div className="hero-label" style={{ marginBottom: '8px' }}>Opportunities Detected</div>
-            <div className="hero-value" style={{ fontSize: '32px', color: 'var(--navy)', marginBottom: '4px' }}>
-              {fmtCurrency(pipeline?.total_abandoned_cart_value_detected || 0)}
+        <div className="beta-readiness">
+          <div>
+            <span className="readiness-label">Launch status</span>
+            <strong>{billingActive ? "Paid beta active" : "Paid beta setup needed"}</strong>
+            <p>
+              {billingActive
+                ? "The store can use the agent workflow. Keep high-risk actions in approval mode until setup is complete."
+                : "Start billing or keep demo/test mode active before giving this to a real customer."}
+            </p>
+          </div>
+          <Link to={billingActive ? "/app/onboarding" : "/app/billing"} className="btn-primary">
+            {billingActive ? "Open onboarding" : "Start billing"}
+          </Link>
+        </div>
+
+        <LaunchChecklist readiness={readiness} billingActive={billingActive} />
+
+        <DemoDataPanel demoStatus={demoStatus} />
+
+        {pendingApprovals > 0 && (
+          <Link to="/app/approvals" style={approvalBannerStyle}>
+            <span>{pendingApprovals} action{pendingApprovals === 1 ? "" : "s"} need owner approval</span>
+            <strong>Review now</strong>
+          </Link>
+        )}
+
+        {/* Hero Metric */}
+        <div className={`hero-metric ${isFlashing ? "flash" : ""}`}>
+          <div className="hero-label">Net Profit Impact</div>
+          <div className="hero-value">{fmt(netProfit)}</div>
+          <span className="hero-trend">Up this month</span>
+        </div>
+
+        <div className="ops-grid">
+          <div className="card">
+            <div className="ops-card-header" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
+              <span style={{ fontWeight: 800 }}>Customer Signals</span>
+              <strong style={{ fontSize: '11px', color: 'var(--gray-400)', textTransform: 'uppercase' }}>Last 7 days</strong>
             </div>
-            <div style={{ fontSize: '12px', color: 'var(--gray-500)' }}>Potential cart value detected (30d)</div>
+            <div className="signal-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <SignalMetric label="Customers known" value={customerSignals.customers} />
+              <SignalMetric label="Search intents" value={customerSignals.searches7d} />
+              <SignalMetric label="Abandoned carts" value={customerSignals.abandonedCarts7d} />
+              <SignalMetric label="Recovered carts" value={customerSignals.recoveredCarts7d} />
+            </div>
           </div>
 
-          <div className="card" style={{ padding: '24px', borderTop: '4px solid var(--gold)' }}>
-            <div className="hero-label" style={{ marginBottom: '8px' }}>Margin Risks Blocked</div>
-            <div className="hero-value" style={{ fontSize: '32px', color: 'var(--gold)', marginBottom: '4px' }}>
-              {risks?.margin_risk_actions_blocked || 0}
+          <div className="card">
+            <div className="ops-card-header" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
+              <span style={{ fontWeight: 800 }}>Worker Health</span>
+              <strong style={{ fontSize: '11px', color: queueHealth.failed > 0 ? 'var(--red)' : 'var(--green)', textTransform: 'uppercase' }}>{queueHealth.status}</strong>
             </div>
-            <div style={{ fontSize: '12px', color: 'var(--gray-500)' }}>Unsafe discounts & offers prevented</div>
-          </div>
-
-          <div className="card" style={{ padding: '24px', borderTop: '4px solid var(--green)' }}>
-            <div className="hero-label" style={{ marginBottom: '8px' }}>Tasks Completed</div>
-            <div className="hero-value" style={{ fontSize: '32px', color: 'var(--green)', marginBottom: '4px' }}>
-              {activity?.agent_tasks_completed || 0}
+            <div className="signal-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <SignalMetric label="Pending jobs" value={queueHealth.pending} />
+              <SignalMetric label="Processing" value={queueHealth.processing} />
+              <SignalMetric label="Done today" value={queueHealth.completedToday} />
+              <SignalMetric label="Failed" value={queueHealth.failed} tone={queueHealth.failed > 0 ? "danger" : "normal"} />
             </div>
-            <div style={{ fontSize: '12px', color: 'var(--gray-500)' }}>Autonomous agency actions taken</div>
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: '32px' }}>
-          
-          {/* LEFT COLUMN: ACTIVITY & PIPELINE */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
-            
-            {/* Activation Score for New Stores */}
-            {activation && (
-              <div className="card" style={{ background: 'linear-gradient(to right, #ffffff, var(--ivory))' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                  <h2 className="section-title" style={{ marginBottom: 0 }}>Agency Activation Score</h2>
-                  <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--primary)' }}>{activation.score}%</div>
+        {/* Agent Status */}
+        {overview?.agents && (
+          <div className="agents-grid">
+            {overview.agents.map((a: any) => (
+              <div className="agent-card-premium" key={a.name}>
+                <div className="agent-card-header" style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+                  <div className="agent-icon-box" style={{ marginBottom: 0, width: '32px', height: '32px', fontSize: '14px' }}>{a.emoji}</div>
+                  <span style={{ fontWeight: 700, fontSize: '13px' }}>{a.display_name}</span>
+                  <div className="status-dot active" style={{ marginLeft: 'auto', marginRight: 0 }} />
                 </div>
-                <div style={{ width: '100%', height: '10px', background: 'var(--gray-100)', borderRadius: '5px', overflow: 'hidden', marginBottom: '24px' }}>
-                  <div style={{ width: `${activation.score}%`, height: '100%', background: 'var(--primary)' }}></div>
+                <div style={{ fontSize: '28px', fontWeight: 800 }}>{a.today_actions}</div>
+                <div style={{ fontSize: '11px', color: 'var(--gray-400)', textTransform: 'uppercase', fontWeight: 700 }}>actions today</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Activity Feed */}
+        <div className="feed-section">
+          <h2 className="section-title">Live Activity Feed</h2>
+          <div className="feed-list">
+            {feedItems.length === 0 ? (
+              <div className="feed-empty">No activity yet. Your agents are standing by.</div>
+            ) : feedItems.map((item: any) => {
+              const d = toPlain(item);
+              return (
+                <div className="feed-item" key={item.id}>
+                  <div className={`status-dot ${d.dot === 'red' ? 'red' : d.dot === 'amber' ? 'warning' : 'active'}`} />
+                  {d.amt && <span style={{ fontWeight: 800, color: 'var(--green)', marginRight: '12px' }}>{d.amt}</span>}
+                  <span style={{ fontSize: '14px' }}>{d.text}</span>
+                  <span style={{ marginLeft: 'auto', fontSize: '12px', color: 'var(--gray-400)' }}>{timeAgo(item.time)}</span>
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                  {activation.checklist.map((item: any, i: number) => (
-                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
-                      <span style={{ color: item.completed ? 'var(--green)' : 'var(--gray-300)' }}>{item.completed ? '✓' : '○'}</span>
-                      <span style={{ color: item.completed ? 'var(--navy)' : 'var(--gray-400)' }}>{item.label}</span>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Battery Inventory */}
+        <div className="inventory-section" style={{ marginTop: '40px' }}>
+          <h2 className="section-title">Inventory Watch</h2>
+          <div className="inventory-grid">
+            {inventory.map((item: any, i: number) => {
+              const p = battPct(item.stock, item.maxStock);
+              const c = battCls(p);
+              return (
+                <div className="card" style={{ padding: '16px', marginBottom: '12px' }} key={i}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+                    <div className="battery">
+                      <div className={`battery-fill ${c}`} style={{ width: `${Math.max(p, 5)}%` }} />
                     </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Pipeline Table */}
-            <div className="card">
-              <h2 className="section-title">📡 Opportunity Pipeline</h2>
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Source</th>
-                    <th>Detection</th>
-                    <th>Potential Value</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td><strong>Cart Sniper</strong></td>
-                    <td>Abandoned Carts</td>
-                    <td>{fmtCurrency(pipeline?.total_abandoned_cart_value_detected || 0)}</td>
-                    <td><span className="badge badge-warning">Drafting Offers</span></td>
-                  </tr>
-                  <tr>
-                    <td><strong>Personal Shopper</strong></td>
-                    <td>Customer Queries</td>
-                    <td>—</td>
-                    <td><span className="badge badge-success">Handling Leads</span></td>
-                  </tr>
-                  <tr>
-                    <td><strong>Retention Engine</strong></td>
-                    <td>VIP Retention</td>
-                    <td>—</td>
-                    <td><span className="badge badge-success">Monitoring</span></td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
-            {/* Margin Protection */}
-            <div className="card">
-              <h2 className="section-title">🛡️ Margin Risk Protection</h2>
-              <div className="agents-grid">
-                <div style={{ textAlign: 'center', padding: '20px', background: 'var(--gray-50)', borderRadius: 'var(--radius-md)' }}>
-                  <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--red)' }}>{risks?.unsafe_discounts_blocked || 0}</div>
-                  <div style={{ fontSize: '12px', color: 'var(--gray-500)', textTransform: 'uppercase', fontWeight: 700 }}>Unsafe Discounts Blocked</div>
-                </div>
-                <div style={{ textAlign: 'center', padding: '20px', background: 'var(--gray-50)', borderRadius: 'var(--radius-md)' }}>
-                  <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--gold)' }}>{risks?.unsafe_free_shipping_offers_blocked || 0}</div>
-                  <div style={{ fontSize: '12px', color: 'var(--gray-500)', textTransform: 'uppercase', fontWeight: 700 }}>Unsafe Shipping Blocked</div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* RIGHT COLUMN: NEXT BEST ACTIONS */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
-            <div className="card" style={{ background: 'var(--navy)', color: 'white' }}>
-              <h2 className="section-title" style={{ color: 'var(--gold)' }}>⚡ Next Best Actions</h2>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                {nextActions.length === 0 ? (
-                  <p style={{ fontSize: '14px', color: 'var(--gray-400)' }}>Your agency is fully optimized. No pending setup tasks.</p>
-                ) : nextActions.map((action: any, i: number) => (
-                  <div key={i} style={{ borderLeft: `3px solid ${action.priority === 'high' ? 'var(--red)' : 'var(--gold)'}`, padding: '12px 16px', background: 'rgba(255,255,255,0.05)', borderRadius: '4px' }}>
-                    <div style={{ fontWeight: 700, marginBottom: '4px' }}>{action.title}</div>
-                    <p style={{ fontSize: '12px', color: 'var(--gray-400)', marginBottom: '12px' }}>{action.reason}</p>
-                    <a href={action.link} className="btn-primary" style={{ padding: '6px 12px', fontSize: '11px', background: action.priority === 'high' ? 'var(--red)' : 'var(--gold)', color: 'var(--navy)' }}>
-                      {action.cta}
-                    </a>
+                    <div>
+                      <div style={{ fontWeight: 700 }}>{item.name}</div>
+                      <div style={{ fontSize: '12px', color: p <= 10 ? 'var(--red)' : 'var(--gray-500)' }}>{item.stock} units ({p}%)</div>
+                    </div>
+                    {p <= 10 && <button className="btn-primary" style={{ marginLeft: 'auto', background: 'var(--red)' }}>Restock Action Required</button>}
                   </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Quick Activity Stats */}
-            <div className="card">
-              <h2 className="section-title">📊 Activity Summary</h2>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px' }}>
-                  <span style={{ color: 'var(--gray-500)' }}>Interactions Handled</span>
-                  <strong>{activity?.customer_interactions_handled || 0}</strong>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px' }}>
-                  <span style={{ color: 'var(--gray-500)' }}>Recovery Emails Sent</span>
-                  <strong>{activity?.recovery_emails_sent || 0}</strong>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px' }}>
-                  <span style={{ color: 'var(--gray-500)' }}>Actions Pending</span>
-                  <strong style={{ color: (activity?.actions_pending || 0) > 0 ? 'var(--gold)' : 'var(--navy)' }}>{activity?.actions_pending || 0}</strong>
-                </div>
-              </div>
-            </div>
+              );
+            })}
           </div>
-
         </div>
       </main>
     </div>
   );
 }
+
+function DemoDataPanel({ demoStatus }: { demoStatus: string | null }) {
+  return (
+    <div className="demo-data-panel">
+      <div>
+        <strong>Make the app look alive in one click</strong>
+        <p>Adds sample COGS, customer signals, carts, approvals, jobs, and revenue impact.</p>
+        {demoStatus === "seeded" && <p className="demo-data-result" style={{ color: 'var(--green)', fontWeight: 700 }}>Sample demo data loaded.</p>}
+        {demoStatus === "cleared" && <p className="demo-data-result" style={{ color: 'var(--gray-500)', fontWeight: 700 }}>Sample demo data cleared.</p>}
+      </div>
+      <div className="demo-data-actions" style={{ display: 'flex', gap: '8px' }}>
+        <Form action="/app/demo-data" method="post">
+          <input type="hidden" name="intent" value="seed" />
+          <button type="submit" className="btn-primary" style={{ background: 'var(--navy)' }}>Load sample data</button>
+        </Form>
+        <Form action="/app/demo-data" method="post">
+          <input type="hidden" name="intent" value="clear" />
+          <button type="submit" className="btn-primary" style={{ background: 'white', color: 'var(--navy)', border: '1px solid var(--gray-200)' }}>Clear sample</button>
+        </Form>
+      </div>
+    </div>
+  );
+}
+
+function LaunchChecklist({
+  readiness,
+  billingActive,
+}: {
+  readiness: { readyCount: number; totalCount: number; items: Array<{ key: string; title: string; status: string; detail: string; href?: string }> };
+  billingActive: boolean;
+}) {
+  const importantItems = [
+    {
+      key: "billing",
+      title: "Founder beta billing",
+      status: billingActive ? "ready" : "manual",
+      detail: billingActive
+        ? "Shopify subscription is active."
+        : "Use Shopify Billing test mode for dev stores.",
+      href: "/app/billing",
+    },
+    ...readiness.items.filter((item) =>
+      ["privacy_webhooks", "legal", "safety", "cogs", "pixel", "queue", "email"].includes(item.key)
+    ),
+  ].slice(0, 6);
+
+  return (
+    <div className="launch-checklist">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+        <div>
+          <span className="readiness-label">Reviewer-safe setup</span>
+          <h2 className="section-title" style={{ marginBottom: 0 }}>{readiness.readyCount}/{readiness.totalCount || 7} ready</h2>
+        </div>
+        <Link to="/app/onboarding" style={{ fontSize: '13px', fontWeight: 700, color: 'var(--primary)' }}>Full checklist →</Link>
+      </div>
+      <div className="launch-checklist-grid">
+        {importantItems.map((item) => (
+          <Link to={item.href || "/app/onboarding"} className="launch-check-item" key={item.key}>
+            <div className={`launch-status ${item.status}`} />
+            <div>
+              <strong style={{ fontSize: '13px' }}>{item.title}</strong>
+              <p style={{ fontSize: '11px', lineHeight: 1.4 }}>{item.detail}</p>
+            </div>
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SignalMetric({
+  label,
+  value,
+  tone = "normal",
+}: {
+  label: string;
+  value: number;
+  tone?: "normal" | "danger";
+}) {
+  return (
+    <div style={{ padding: '12px', background: 'var(--gray-50)', borderRadius: '8px' }}>
+      <div style={{ fontSize: '11px', color: 'var(--gray-400)', textTransform: 'uppercase', fontWeight: 700, marginBottom: '4px' }}>{label}</div>
+      <div style={{ fontSize: '20px', fontWeight: 800, color: tone === 'danger' ? 'var(--red)' : 'var(--navy)' }}>{value.toLocaleString("en-US")}</div>
+    </div>
+  );
+}
+
+const approvalBannerStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: 16,
+  background: "#FEF3C7",
+  color: "#92400E",
+  border: "1px solid #F59E0B",
+  borderRadius: 12,
+  padding: "16px 20px",
+  marginBottom: 32,
+  textDecoration: "none",
+  fontSize: 14,
+  fontWeight: 800,
+  boxShadow: 'var(--shadow-sm)'
+};

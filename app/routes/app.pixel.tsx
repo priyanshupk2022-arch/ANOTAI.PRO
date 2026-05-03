@@ -4,6 +4,7 @@ import { useLoaderData } from "@remix-run/react";
 import { useState } from "react";
 import { getWebPixelScript } from "~/services/web-pixel.server";
 import { authenticate } from "~/shopify.server";
+import { AppSidebar } from "~/components/AppSidebar";
 import "~/styles/dashboard.css";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -21,30 +22,22 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export default function PixelSetup() {
   const { pixelScript, appUrl } = useLoaderData<typeof loader>();
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState("");
 
   const copyToClipboard = async () => {
-    await navigator.clipboard.writeText(pixelScript);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      setCopyError("");
+      await copyText(pixelScript);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopyError("Copy blocked by browser. Select the code below and copy it manually.");
+    }
   };
 
   return (
     <div className="dashboard-layout">
-      <nav className="sidebar">
-        <div className="sidebar-brand">ANOTAI</div>
-        <ul className="sidebar-nav">
-          <li><a className="sidebar-item" href="/app"><span className="sidebar-item-icon">DB</span> Dashboard</a></li>
-          <li><a className="sidebar-item" href="/app/cogs"><span className="sidebar-item-icon">MG</span> COGS Manager</a></li>
-          <li><a className="sidebar-item" href="/app/agents"><span className="sidebar-item-icon">AI</span> Agents</a></li>
-          <li><a className="sidebar-item" href="/app/analytics"><span className="sidebar-item-icon">RA</span> Analytics</a></li>
-        </ul>
-        <div className="sidebar-divider" />
-        <div className="sidebar-label">Setup</div>
-        <ul className="sidebar-nav">
-          <li><a className="sidebar-item active" href="/app/pixel"><span className="sidebar-item-icon">PX</span> Web Pixel</a></li>
-          <li><a className="sidebar-item" href="/app/settings"><span className="sidebar-item-icon">ST</span> Settings</a></li>
-        </ul>
-      </nav>
+      <AppSidebar active="pixel" />
 
       <main className="main-content">
         <div className="page-header">
@@ -73,6 +66,7 @@ export default function PixelSetup() {
               {copied ? "Copied" : "Copy Code"}
             </button>
           </div>
+          {copyError && <div style={copyErrorStyle}>{copyError}</div>}
           <pre style={preStyle}>{pixelScript}</pre>
         </div>
 
@@ -87,6 +81,28 @@ export default function PixelSetup() {
       </main>
     </div>
   );
+}
+
+async function copyText(text: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+
+  try {
+    const copied = document.execCommand("copy");
+    if (!copied) throw new Error("Copy command failed.");
+  } finally {
+    document.body.removeChild(textarea);
+  }
 }
 
 function Step({ number, title, text }: { number: string; title: string; text: string }) {
@@ -153,6 +169,17 @@ const copyButtonStyle: React.CSSProperties = {
   fontWeight: 800,
   cursor: "pointer",
   fontFamily: "'DM Sans', sans-serif",
+};
+
+const copyErrorStyle: React.CSSProperties = {
+  background: "#FEF3C7",
+  border: "1px solid #F59E0B",
+  borderRadius: 8,
+  color: "#92400E",
+  fontSize: 13,
+  fontWeight: 700,
+  marginBottom: 12,
+  padding: "10px 12px",
 };
 
 const preStyle: React.CSSProperties = {

@@ -1,7 +1,7 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 client_id = "b6c75a835a41089f4b84b77579bf7a5e"
-application_url = "https://your-app.fly.dev"   # ⚠️ UPDATE to your real production URL
+application_url = "https://REPLACE_WITH_PRODUCTION_URL"   # ⚠️ UPDATE to your real production URL
 embedded = true
 name = "ANOTAI"
 
@@ -21,15 +21,7 @@ api_version = "2026-04"
   # ── Core Business Webhooks ──────────────────────────────────────────
   [[webhooks.subscriptions]]
   uri = "/webhooks"
-  topics = [ "carts/update" ]
-
-  [[webhooks.subscriptions]]
-  uri = "/webhooks"
-  topics = [ "orders/create" ]
-
-  [[webhooks.subscriptions]]
-  uri = "/webhooks"
-  topics = [ "products/create", "products/update" ]
+  topics = [ "carts/update", "orders/create", "products/create", "products/update", "app_subscriptions/update" ]
 
   # ── App Lifecycle ───────────────────────────────────────────────────
   [[webhooks.subscriptions]]
@@ -56,9 +48,9 @@ api_version = "2026-04"
 [auth]
 # ⚠️ UPDATE all URLs to your real production domain before deploy
 redirect_urls = [
-  "https://your-app.fly.dev/auth/callback",
-  "https://your-app.fly.dev/auth/shopify/callback",
-  "https://your-app.fly.dev/api/auth/callback"
+  "https://REPLACE_WITH_PRODUCTION_URL/auth/callback",
+  "https://REPLACE_WITH_PRODUCTION_URL/auth/shopify/callback",
+  "https://REPLACE_WITH_PRODUCTION_URL/api/auth/callback"
 ]
 
 [build]

@@ -24,10 +24,14 @@ export default function App() {
         <Link to="/app" rel="home">
           Dashboard
         </Link>
+        <Link to="/app/onboarding">Onboarding</Link>
+        <Link to="/app/approvals">Approvals</Link>
         <Link to="/app/cogs">COGS</Link>
         <Link to="/app/agents">Agents</Link>
+        <Link to="/app/analytics">Analytics</Link>
         <Link to="/app/pixel">Pixel</Link>
         <Link to="/app/billing">Billing</Link>
+        <Link to="/app/settings">Settings</Link>
       </NavMenu>
       <Outlet />
     </AppProvider>

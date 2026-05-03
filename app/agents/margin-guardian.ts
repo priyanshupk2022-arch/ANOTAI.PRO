@@ -4,10 +4,11 @@
  * The Margin Guardian is the GATEKEEPER of ANOTAI.
  * No discount goes to the customer without Guardian's approval.
  * 
- * Rule: Minimum Price = COGS × 1.20 (ensures 20% minimum profit margin)
+ * Rule: Minimum Price = COGS × (1 + minMarginPct/100)
  */
 
 import { supabase } from "~/utils/supabase.server";
+import { getOwnerControls } from "~/services/agent-controls.server";
 
 // ─── Types ───────────────────────────────────────────────
 export interface COGSEntry {
@@ -76,6 +77,11 @@ export async function validateDiscount(
   const details: ValidationResult["details"] = [];
   let overallApproved = true;
   let minSafeDiscountPct = requestedDiscountPct;
+  
+  const controls = await getOwnerControls(storeId);
+  const minMarginPct = controls.safety.minMarginPct;
+  const marginMultiplier = 1 + minMarginPct / 100;
+
   let totalCurrentPrice = 0;
   let totalCogs = 0;
 
@@ -86,6 +92,7 @@ export async function validateDiscount(
     if (!cogs) {
       // No COGS data = BLOCK the discount (safety first)
       overallApproved = false;
+      minSafeDiscountPct = 0;
       details.push({
         variant_id: variantId,
         product_title: "Unknown (Missing COGS)",
@@ -99,9 +106,9 @@ export async function validateDiscount(
     }
 
     const currentPrice = currentPrices[variantId] || 0;
-    const minPrice = cogs.cogs * 1.20; // 20% margin floor
+    const minPrice = cogs.cogs * marginMultiplier;
     const discountedPrice = currentPrice * (1 - requestedDiscountPct / 100);
-    const maxSafe = calculateMaxDiscount(currentPrice, cogs.cogs);
+    const maxSafe = calculateMaxDiscount(currentPrice, cogs.cogs, minMarginPct);
 
     totalCurrentPrice += currentPrice;
     totalCogs += cogs.cogs;
@@ -141,7 +148,7 @@ export async function validateDiscount(
       if (estimatedShippingCost !== null) {
         finalEstimatedProfit = totalCurrentPrice - totalCogs - estimatedShippingCost;
         finalEstimatedMargin = totalCurrentPrice > 0 ? (finalEstimatedProfit / totalCurrentPrice) * 100 : 0;
-        freeShippingMarginSafe = finalEstimatedMargin >= 20; // Floor
+        freeShippingMarginSafe = finalEstimatedMargin >= minMarginPct;
       } else {
         freeShippingMarginSafe = false;
       }
@@ -159,7 +166,7 @@ export async function validateDiscount(
   if (overallApproved) {
     autoReplyAllowed = true;
   } else if (altOfferType === "discount") {
-    autoReplyAllowed = finalEstimatedMargin >= 20 && Number(altOfferValue) <= merchantAutoApproveLimit;
+    autoReplyAllowed = finalEstimatedMargin >= minMarginPct && Number(altOfferValue) <= merchantAutoApproveLimit;
   } else if (altOfferType === "free_shipping") {
     autoReplyAllowed = freeShippingMarginSafe && merchantAllowsAutoFreeShipping;
   }
@@ -174,8 +181,10 @@ export async function validateDiscount(
     approved: overallApproved,
     max_safe_discount_pct: overallApproved ? requestedDiscountPct : Math.floor(minSafeDiscountPct),
     reason: overallApproved
-      ? `✅ Discount approved. All products maintain 20%+ margin.`
-      : `⛔ Discount BLOCKED. Would breach margin floor. Max safe discount: ${Math.floor(minSafeDiscountPct)}%`,
+      ? `✅ Discount approved. All products maintain ${minMarginPct}%+ margin.`
+      : details.some((detail) => detail.cogs <= 0)
+        ? "⛔ Blocked: Missing COGS data."
+        : `⛔ Discount BLOCKED. Would breach margin floor. Max safe discount: ${Math.floor(minSafeDiscountPct)}%`,
     details,
     requested_discount: requestedDiscountPct,
     requested_discount_safe: overallApproved,
@@ -196,9 +205,9 @@ export async function validateDiscount(
  * Calculate the maximum safe discount percentage for a product.
  * Formula: max_discount = ((price - min_price) / price) * 100
  */
-export function calculateMaxDiscount(currentPrice: number, cogs: number): number {
+export function calculateMaxDiscount(currentPrice: number, cogs: number, minMarginPct = 20): number {
   if (currentPrice <= 0) return 0;
-  const minPrice = cogs * 1.20;
+  const minPrice = cogs * (1 + minMarginPct / 100);
   const maxDiscount = ((currentPrice - minPrice) / currentPrice) * 100;
   return Math.max(0, Math.floor(maxDiscount * 100) / 100); // Floor to 2 decimals, never negative
 }
@@ -206,8 +215,8 @@ export function calculateMaxDiscount(currentPrice: number, cogs: number): number
 /**
  * Get the minimum safe selling price for a variant.
  */
-export function getMinPrice(cogs: number): number {
-  return Math.ceil(cogs * 1.20 * 100) / 100; // Ceil to 2 decimals (always round up)
+export function getMinPrice(cogs: number, minMarginPct = 20): number {
+  return Math.ceil(cogs * (1 + minMarginPct / 100) * 100) / 100; // Ceil to 2 decimals (always round up)
 }
 
 // ─── COGS Data Functions ─────────────────────────────────
@@ -251,6 +260,9 @@ export async function upsertCOGS(
   productTitle: string,
   cogs: number
 ): Promise<COGSEntry | null> {
+  const controls = await getOwnerControls(storeId);
+  const minPrice = getMinPrice(cogs, controls.safety.minMarginPct);
+
   const { data, error } = await supabase
     .from("products_cogs")
     .upsert(
@@ -260,7 +272,7 @@ export async function upsertCOGS(
         variant_id: variantId,
         product_title: productTitle,
         cogs: cogs,
-        min_price: getMinPrice(cogs),
+        min_price: minPrice,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "store_id,variant_id" }
@@ -320,6 +332,8 @@ export async function getCOGSCoverage(storeId: string, totalProducts: number): P
  */
 export async function getMarginReport(storeId: string): Promise<MarginReport> {
   const allCogs = await getAllCOGS(storeId);
+  const controls = await getOwnerControls(storeId);
+  const minMargin = controls.safety.minMarginPct;
 
   if (allCogs.length === 0) {
     return {
@@ -339,17 +353,15 @@ export async function getMarginReport(storeId: string): Promise<MarginReport> {
   let atRisk = 0;
 
   for (const item of allCogs) {
-    // Margin percentage: how much above COGS is the min selling price
-    // min_price = COGS * 1.20, so margin = (min_price - COGS) / min_price * 100 = ~16.67% always
-    // Better metric: just report the 20% floor as the guaranteed margin
-    const margin = 20; // We guarantee minimum 20% margin on all products
+    // We guarantee minimum configured margin on all products
+    const margin = minMargin; 
     totalMargin += margin;
 
     if (margin < lowestMargin) {
       lowestMargin = margin;
       lowestProduct = item.product_title;
     }
-    if (margin < 25) atRisk++; // Less than 25% margin = at risk
+    if (margin < (minMargin + 5)) atRisk++; // Near the floor
   }
 
   return {
@@ -380,6 +392,11 @@ async function logGuardianAction(
       requested_discount_pct: requestedPct,
       max_safe_discount_pct: safePct,
       products_checked: details.length,
+      reason: details.some((detail) => detail.cogs <= 0)
+        ? "COGS_MISSING"
+        : approved
+          ? "DISCOUNT_APPROVED"
+          : "MARGIN_FLOOR_BREACH",
       details,
     },
     status: approved ? "executed" : "blocked",

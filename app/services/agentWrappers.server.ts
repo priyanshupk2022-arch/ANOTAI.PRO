@@ -1,14 +1,15 @@
-import { getSkincareAdvice } from "~/agents/personal-shopper";
+import { getSkincareConsultation } from "~/agents/personal-shopper";
 import { executeRecovery } from "~/agents/cart-sniper";
 import { validateDiscount } from "~/agents/margin-guardian";
-import { getRetentionMetrics } from "~/agents/retention-engine";
+import { getIntentMetrics } from "~/agents/retention-engine";
 import { supabase } from "~/utils/supabase.server";
 
 export async function runPersonalShopperWrapper(storeId: string, email: string, message: string, catalog: any[]) {
-  const result = await getSkincareAdvice(storeId, email, message, catalog);
+  // Adaptation: Wrap the message as concern for the production consultation logic
+  const result = await getSkincareConsultation(storeId, { concern: message }, catalog);
   return {
     observation: "Customer asked a skincare question.",
-    recommendation: result.message,
+    recommendation: result.summary,
     requested_action: {
       type: "send_chat_response",
       payload: result
@@ -63,8 +64,8 @@ export async function runMarginGuardianWrapper(storeId: string, variantIds: stri
     if (settings) {
       limit = settings.require_approval_above_discount ?? 15;
       // We check if the property exists in the DB result object, if so, use it, else default
-      if ('allow_auto_free_shipping' in settings) allowFreeShipping = settings.allow_auto_free_shipping;
-      if ('estimated_shipping_cost' in settings) estimatedShipping = settings.estimated_shipping_cost;
+      if ('allow_auto_free_shipping' in settings) allowFreeShipping = (settings as any).allow_auto_free_shipping;
+      if ('estimated_shipping_cost' in settings) estimatedShipping = (settings as any).estimated_shipping_cost;
     }
   } catch (e) {
     // Graceful fallback if columns don't exist in DB yet

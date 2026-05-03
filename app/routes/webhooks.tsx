@@ -47,8 +47,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     .single();
 
   if (!store) {
-    await ErrorLogger.webhook(null, topic, `Webhook for unknown store: ${shopDomain}`, { shopDomain, topic });
-    return json({ error: "Store not found" }, { status: 404 });
+    if (topic !== "app/uninstalled") {
+      await ErrorLogger.webhook(null, topic, `Webhook for unknown store: ${shopDomain}`, { shopDomain, topic });
+      return json({ error: "Store not found" }, { status: 404 });
+    }
+    // For uninstall of unknown store, just return 200
+    return json({ success: true });
   }
 
   // ── 4. Idempotency check — skip already-processed events ─────────────
@@ -60,19 +64,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     if (insertError) {
-      // 23505 is Postgres unique_violation error code
       if (insertError.code === "23505") {
         console.log(`[WEBHOOK_SPIKE] Duplicate event ${shopifyEventId} blocked (${topic})`);
         return json({ success: true, skipped: true });
       }
-      // Log other DB errors but don't fail yet
       await ErrorLogger.webhook(store.id, topic, `DB Error: ${insertError.message}`, { shopifyEventId });
     }
   }
 
   // ── 5. Check store automation kill switch ─────────────────────────────
   const safety = await getStoreSafetySettings(store.id);
-  if (!safety.automation_enabled && topic !== "app/uninstalled") {
+  if (!safety.automation_enabled && topic !== "app/uninstalled" && topic !== "app_subscriptions/update") {
     console.log(`[KILL_SWITCH] Automation paused for ${shopDomain} — webhook ${topic} skipped`);
     return json({ success: true, paused: true });
   }
@@ -80,6 +82,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   // ── 6. Route to agent ─────────────────────────────────────────────────
   try {
     switch (topic) {
+      case "app_subscriptions/update":
+        await syncBillingStatusFromWebhook(store.id, payload);
+        break;
+
       case "carts/update":
         if (store.plan_status !== "active") break;
         await handleCartWebhook(
@@ -130,10 +136,29 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         console.log(`[WEBHOOK] Unhandled topic: ${topic}`);
     }
   } catch (error: any) {
-    // Log failure but still return 200 so Shopify doesn't retry infinitely
     await ErrorLogger.webhook(store.id, topic, error, { shopDomain, payload_id: payload?.id });
     console.error(`❌ Webhook error (${topic}):`, error);
   }
 
   return json({ success: true });
 };
+
+async function syncBillingStatusFromWebhook(storeId: string, payload: any) {
+  const subscription = payload.app_subscription || payload;
+  const status = String(subscription.status || "").toLowerCase();
+  const subscriptionId = subscription.admin_graphql_api_id || subscription.id || null;
+  const planStatus = status === "active" ? "active" : "inactive";
+
+  const { error } = await supabase
+    .from("stores")
+    .update({
+      plan_status: planStatus,
+      billing_id: subscriptionId ? String(subscriptionId) : null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", storeId);
+
+  if (error) {
+    throw new Error(`Failed to sync billing webhook: ${error.message}`);
+  }
+}

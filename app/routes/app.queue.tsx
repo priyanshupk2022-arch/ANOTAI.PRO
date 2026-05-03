@@ -4,7 +4,7 @@ import { useLoaderData, useFetcher } from "@remix-run/react";
 import { authenticate } from "~/shopify.server";
 import { supabase } from "~/utils/supabase.server";
 import { ensureStoreForSession } from "~/utils/store.server";
-import { approveAction, rejectAction, getActivityMetrics } from "~/services/actionQueue.server";
+import { approveAction, rejectAction } from "~/services/actionQueue.server";
 import "~/styles/dashboard.css";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -140,11 +140,9 @@ export default function ActionQueuePage() {
                         <div style={{ marginTop: '4px' }}>
                           <span className={`badge ${
                             isPending ? 'badge-warning' : 
-                            isApproved ? 'badge-success' : 
-                            isExecuted ? 'badge-success' : 
-                            isRejected ? 'badge-error' : 'badge-error'
+                            (isApproved || isExecuted) ? 'badge-success' : 'badge-error'
                           }`} style={{ fontSize: '10px' }}>
-                            {item.status.toUpperCase()}
+                            {isPending ? "PENDING" : "APPROVAL RECORDED"}
                           </span>
                         </div>
                         {manualRequired && (
@@ -188,7 +186,7 @@ export default function ActionQueuePage() {
                         )}
                         {item.executed_at && (
                           <div style={{ color: 'var(--green)' }}>
-                            Executed: {new Date(item.executed_at).toLocaleTimeString()}
+                            {isExecuted ? `Executed: ${new Date(item.executed_at).toLocaleTimeString()}` : "Approval recorded. Execution pending/manual if required."}
                           </div>
                         )}
                         {item.error_message && (
@@ -224,7 +222,7 @@ export default function ActionQueuePage() {
                           </fetcher.Form>
                         ) : (
                           <div style={{ fontSize: '11px', color: 'var(--gray-400)', fontStyle: 'italic' }}>
-                            Action Processed
+                            {isExecuted ? "Action Processed" : "Approval recorded. Pending execution."}
                           </div>
                         )}
                       </td>

@@ -5,15 +5,13 @@
  * No agent access without active $999/mo subscription.
  */
 
-// AdminApiContext type — using 'any' to avoid brittle deep node_modules imports
-// that break across @shopify/shopify-app-remix versions
 type AdminApiContext = {
   graphql: (query: string, options?: { variables?: Record<string, any> }) => Promise<Response>;
 };
 
 const PLAN_NAME = "ANOTAI Elite Agency";
 const PLAN_PRICE = 999.0;
-const TRIAL_DAYS = 7; // 7-day free trial to hook them in
+const TRIAL_DAYS = 7;
 const BILLING_TEST_MODE = process.env.SHOPIFY_BILLING_TEST !== "false";
 
 /**
@@ -23,8 +21,8 @@ const BILLING_TEST_MODE = process.env.SHOPIFY_BILLING_TEST !== "false";
 export async function createBillingCharge(
   admin: AdminApiContext,
   returnUrl: string,
-  planName: string = "ANOTAI Growth",
-  planPrice: number = 999.0
+  planName: string = PLAN_NAME,
+  planPrice: number = PLAN_PRICE
 ): Promise<string> {
   const response = await admin.graphql(
     `#graphql
@@ -50,7 +48,7 @@ export async function createBillingCharge(
     {
       variables: {
         name: planName,
-        returnUrl: returnUrl,
+        returnUrl,
         trialDays: TRIAL_DAYS,
         test: BILLING_TEST_MODE,
         lineItems: [
@@ -67,14 +65,18 @@ export async function createBillingCharge(
     }
   );
 
-  const data = await response.json();
+  const data = await parseShopifyGraphqlResponse(response, "billing approval");
   const result = data.data?.appSubscriptionCreate;
 
   if (result?.userErrors?.length > 0) {
-    throw new Error(`Billing error: ${result.userErrors.map((e: any) => e.message).join(", ")}`);
+    throw new Error(`Billing error: ${result.userErrors.map((error: any) => error.message).join(", ")}`);
   }
 
-  return result?.confirmationUrl || "";
+  if (!result?.confirmationUrl) {
+    throw new Error("Billing approval failed: Shopify did not return a confirmation URL.");
+  }
+
+  return result.confirmationUrl;
 }
 
 /**
@@ -111,9 +113,15 @@ export async function checkBillingStatus(
     }`
   );
 
-  const data = await response.json();
-  const subs = data.data?.appInstallation?.activeSubscriptions || [];
+  let data: any;
+  try {
+    data = await parseShopifyGraphqlResponse(response, "billing status");
+  } catch (error) {
+    console.warn("Billing status check failed:", error);
+    return { active: false };
+  }
 
+  const subs = data.data?.appInstallation?.activeSubscriptions || [];
   const activeSub = subs.find(
     (s: any) => (s.name.includes("ANOTAI") || s.name.includes("Elite Agency")) && s.status === "ACTIVE"
   );
@@ -160,6 +168,21 @@ export async function cancelSubscription(
     { variables: { id: subscriptionId } }
   );
 
-  const data = await response.json();
+  const data = await parseShopifyGraphqlResponse(response, "billing cancellation");
   return data.data?.appSubscriptionCancel?.userErrors?.length === 0;
+}
+
+async function parseShopifyGraphqlResponse(response: Response, label: string) {
+  const data = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    const message = data?.errors?.[0]?.message || `Shopify returned HTTP ${response.status}`;
+    throw new Error(`${label} failed: ${message}`);
+  }
+
+  if (data?.errors?.length > 0) {
+    throw new Error(`${label} failed: ${data.errors.map((error: any) => error.message).join(", ")}`);
+  }
+
+  return data || {};
 }

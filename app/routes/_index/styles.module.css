@@ -94,6 +94,49 @@
   cursor: pointer;
 }
 
+.demoActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.demoButton {
+  display: inline-flex;
+  align-items: center;
+  min-height: 42px;
+  padding: 0 18px;
+  border: 1px solid #0f172a;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.footerLinks {
+  display: flex;
+  gap: 18px;
+  margin-top: 22px;
+  color: #475569;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.footerLinks a {
+  color: #475569;
+  text-decoration: none;
+}
+
+.footerLinks a:hover {
+  color: #0f172a;
+}
+
 .panel {
   width: 100%;
   padding: 22px;

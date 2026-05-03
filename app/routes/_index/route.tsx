@@ -70,6 +70,19 @@ export default function App() {
             </button>
           </Form>
         )}
+
+        <div className={styles.demoActions}>
+          <a className={styles.demoButton} href="/demo">
+            View Beta Demo
+          </a>
+          <span>Demo opens without Shopify login. Real app opens after store install.</span>
+        </div>
+
+        <footer className={styles.footerLinks}>
+          <a href="/privacy">Privacy</a>
+          <a href="/terms">Terms</a>
+          <a href="/support">Support</a>
+        </footer>
       </section>
 
       <section className={styles.panel} aria-label="Starter agent team">

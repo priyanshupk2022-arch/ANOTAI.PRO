@@ -43,9 +43,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export default function UsagePage() {
   const { usage, plan, deptActivity } = useLoaderData<typeof loader>();
 
-  const aiPercent = Math.min(100, Math.round((usage.ai_interactions_used / plan.ai_interaction_limit) * 100)) || 0;
-  const emailPercent = Math.min(100, Math.round((usage.recovery_emails_sent / plan.recovery_email_limit) * 100)) || 0;
-  const warRoomPercent = plan.war_room_limit > 0 ? Math.min(100, Math.round((usage.war_room_decisions_used / plan.war_room_limit) * 100)) : 0;
+  const aiPercent = Math.min(100, Math.round((usage.ai_interactions_used / (plan as any).ai_interaction_limit) * 100)) || 0;
+  const emailPercent = Math.min(100, Math.round((usage.recovery_emails_sent / (plan as any).recovery_email_limit) * 100)) || 0;
+  const warRoomPercent = (plan as any).war_room_limit > 0 ? Math.min(100, Math.round((usage.war_room_decisions_used / (plan as any).war_room_limit) * 100)) : 0;
 
   return (
     <div className="dashboard-layout animate-fade-in">
@@ -69,7 +69,7 @@ export default function UsagePage() {
         <div className="hero-metric" style={{ padding: '40px', marginBottom: '40px', background: 'var(--navy)' }}>
           <div className="hero-label" style={{ color: 'var(--gray-300)' }}>Current Plan</div>
           <div className="hero-value" style={{ fontSize: '48px', color: 'white', marginBottom: '0' }}>
-            {plan.plan_name} Plan
+            {(plan as any).plan_name} Plan
           </div>
           <div style={{ marginTop: '20px' }}>
             <a href="/app/billing" className="btn-primary" style={{ background: 'var(--gold)', color: 'var(--navy)' }}>Upgrade Plan</a>
@@ -80,7 +80,7 @@ export default function UsagePage() {
           <div className="card">
             <h3 style={{ fontSize: '16px', fontWeight: 700, color: 'var(--navy)', marginBottom: '16px' }}>AI Interactions</h3>
             <div style={{ fontSize: '32px', fontWeight: 800, color: 'var(--navy)', marginBottom: '8px' }}>
-              {usage.ai_interactions_used.toLocaleString()} <span style={{ fontSize: '16px', color: 'var(--gray-400)', fontWeight: 500 }}>/ {plan.ai_interaction_limit.toLocaleString()}</span>
+              {usage.ai_interactions_used.toLocaleString()} <span style={{ fontSize: '16px', color: 'var(--gray-400)', fontWeight: 500 }}>/ {(plan as any).ai_interaction_limit.toLocaleString()}</span>
             </div>
             <div style={{ width: '100%', height: '8px', background: 'var(--gray-100)', borderRadius: '4px', overflow: 'hidden' }}>
               <div style={{ width: `${aiPercent}%`, height: '100%', background: aiPercent > 90 ? 'var(--red)' : 'var(--primary)' }}></div>
@@ -90,7 +90,7 @@ export default function UsagePage() {
           <div className="card">
             <h3 style={{ fontSize: '16px', fontWeight: 700, color: 'var(--navy)', marginBottom: '16px' }}>Recovery Emails</h3>
             <div style={{ fontSize: '32px', fontWeight: 800, color: 'var(--navy)', marginBottom: '8px' }}>
-              {usage.recovery_emails_sent.toLocaleString()} <span style={{ fontSize: '16px', color: 'var(--gray-400)', fontWeight: 500 }}>/ {plan.recovery_email_limit.toLocaleString()}</span>
+              {usage.recovery_emails_sent.toLocaleString()} <span style={{ fontSize: '16px', color: 'var(--gray-400)', fontWeight: 500 }}>/ {(plan as any).recovery_email_limit.toLocaleString()}</span>
             </div>
             <div style={{ width: '100%', height: '8px', background: 'var(--gray-100)', borderRadius: '4px', overflow: 'hidden' }}>
               <div style={{ width: `${emailPercent}%`, height: '100%', background: emailPercent > 90 ? 'var(--red)' : 'var(--gold)' }}></div>

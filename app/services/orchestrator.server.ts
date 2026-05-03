@@ -143,7 +143,7 @@ async function executeHierarchicalWorkflow(storeId: string, eventId: string, eve
       result = await runRetentionEngineWrapper(storeId, payload.email || "");
       inputTokens = 50; outputTokens = 150;
     } else if (agent.key === "margin_guardian") {
-      const discount = payload.discount_requested || (recommendations.find(r => r.result?.requested_action?.payload?.discount)?.result.requested_action.payload.discount.pct) || 0;
+      const discount = payload.discount_requested || (recommendations.find(r => (r.result as any).requested_action?.payload?.discount)?.result as any).requested_action.payload.discount.pct || 0;
       result = await runMarginGuardianWrapper(storeId, payload.variantIds || [], payload.prices || {}, discount);
       inputTokens = 50; outputTokens = 50;
       if (result.requested_action?.type === "propose_alternative") {
@@ -174,7 +174,7 @@ async function executeHierarchicalWorkflow(storeId: string, eventId: string, eve
         storeId, eventId, agentId: agent.id, workflowId: workflow.id,
         model: "gemini-1.5-pro", inputTokens, outputTokens,
         cost: (inputTokens * 0.000001) + (outputTokens * 0.000002),
-        mode
+        mode: mode as any
       });
     }
   }
@@ -269,7 +269,7 @@ async function executeFlatWorkflow(storeId: string, eventId: string, eventType: 
 
   // 3. Load Available Agents
   const availableAgents = await getAvailableAgents(storeId);
-  const activeAgentKeys = targetAgents.filter(key => availableAgents.some(a => a.key === key));
+  const activeAgentKeys = (targetAgents || []).filter(key => availableAgents.some(a => a.key === key));
 
   // 4. Collect Agent Recommendations
   const recommendations = [];
@@ -289,9 +289,9 @@ async function executeFlatWorkflow(storeId: string, eventId: string, eventType: 
     // Call appropriate wrapper based on agent
     if (agentKey === "sales_agent" || agentKey === "personal_shopper") {
       result = await runPersonalShopperWrapper(storeId, payload.email || "", payload.message || "", payload.catalog || []);
-      if (result.requested_action.payload?.discount) {
+      if ((result as any).requested_action.payload?.discount) {
         requiresMarginCheck = true;
-        discountRequested = result.requested_action.payload.discount.pct;
+        discountRequested = (result as any).requested_action.payload.discount.pct;
       }
       inputTokens = 150; outputTokens = 200; 
     } else if (agentKey === "cart_agent" || agentKey === "cart_sniper") {
@@ -326,13 +326,13 @@ async function executeFlatWorkflow(storeId: string, eventId: string, eventType: 
         storeId, eventId, agentId: agent.id, workflowId: thread.id,
         model: "gemini-1.5-pro", inputTokens, outputTokens,
         cost: (inputTokens * 0.000001) + (outputTokens * 0.000002), 
-        mode
+        mode: mode as any
       });
     }
   }
 
   // 5. Margin Guardian Validation (if needed)
-  if (requiresMarginCheck && targetAgents.includes("margin_guardian")) {
+  if (requiresMarginCheck && (targetAgents || []).includes("margin_guardian")) {
     const guardian = availableAgents.find(a => a.key === "margin_guardian");
     if (guardian) {
       const gResult = await runMarginGuardianWrapper(storeId, payload.variantIds || [], payload.prices || {}, discountRequested);
