@@ -1,6 +1,7 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
+import { removeStoreByShopDomain } from "../utils/store.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { shop, session, topic } = await authenticate.webhook(request);
@@ -12,6 +13,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (session) {
     await db.session.deleteMany({ where: { shop } });
   }
+
+  await removeStoreByShopDomain(shop);
 
   return new Response();
 };

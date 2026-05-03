@@ -1,42 +1,39 @@
-# This file stores configurations for your Shopify app.
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
-client_id = ""
+client_id = "b6c75a835a41089f4b84b77579bf7a5e"
+application_url = "https://b7d3a9cbfbe51f.lhr.life"
+embedded = true
+name = "ANOTAI"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "write_products"
+scopes = "read_products,read_orders,write_discounts"
 
 [webhooks]
-api_version = "2024-10"
+api_version = "2026-04"
 
-  # Handled by: /app/routes/webhooks.app.uninstalled.tsx
   [[webhooks.subscriptions]]
   uri = "/webhooks/app/uninstalled"
-  topics = ["app/uninstalled"]
+  topics = [ "app/uninstalled" ]
 
-  # Handled by: /app/routes/webhooks.app.scopes_update.tsx
   [[webhooks.subscriptions]]
-  topics = [ "app/scopes_update" ]
   uri = "/webhooks/app/scopes_update"
+  topics = [ "app/scopes_update" ]
 
-  # Webhooks can have filters
-  # Only receive webhooks for product updates with a product price >= 10.00
-  # See: https://shopify.dev/docs/apps/build/webhooks/customize/filters
-  # [[webhooks.subscriptions]]
-  # topics = ["products/update"]
-  # uri = "/webhooks/products/update"
-  # filter = "variants.price:>=10.00"
+  [[webhooks.subscriptions]]
+  uri = "/webhooks"
+  topics = [ "app_subscriptions/update" ]
 
-  # Mandatory compliance topic for public apps only
-  # See: https://shopify.dev/docs/apps/build/privacy-law-compliance
-  # [[webhooks.subscriptions]]
-  # uri = "/webhooks/customers/data_request"
-  # compliance_topics = ["customers/data_request"]
+  [[webhooks.subscriptions]]
+  uri = "/webhooks"
+  topics = [ "carts/update", "orders/create", "products/create", "products/update" ]
 
-  # [[webhooks.subscriptions]]
-  # uri = "/webhooks/customers/redact"
-  # compliance_topics = ["customers/redact"]
+  [[webhooks.subscriptions]]
+  compliance_topics = [ "customers/data_request", "customers/redact", "shop/redact" ]
+  uri = "/webhooks/privacy"
 
-  # [[webhooks.subscriptions]]
-  # uri = "/webhooks/shop/redact"
-  # compliance_topics = ["shop/redact"]
+[auth]
+redirect_urls = [ "https://b7d3a9cbfbe51f.lhr.life/auth/callback", "https://b7d3a9cbfbe51f.lhr.life/auth/shopify/callback", "https://b7d3a9cbfbe51f.lhr.life/api/auth/callback" ]
+
+[build]
+automatically_update_urls_on_dev = true

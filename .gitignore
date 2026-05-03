@@ -14,7 +14,6 @@ database.sqlite
 .env
 .env.*
 
-package-lock.json
 yarn.lock
 pnpm-lock.yaml
 
@@ -23,3 +22,10 @@ pnpm-lock.yaml
 # Ignore shopify files created during app dev
 .shopify/*
 .shopify.lock
+shopify-dev*.log
+remix-dev*.log
+*.log
+*.err
+*.err.log
+last-app-*.html
+shopify.app.localhost.toml
