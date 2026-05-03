@@ -1,3 +1,10 @@
+/**
+ * 📡 INTENT CAPTURE API — Receives search data from Web Pixel
+ * 
+ * POST /api/intent/capture
+ * Body: { email, query, type?, timestamp }
+ */
+
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { enqueueAgentJob } from "~/services/job-queue.server";
@@ -28,6 +35,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ error: "Missing email or query" }, { status: 400, headers: corsHeaders });
     }
 
+    // Determine store from request origin/referer
     const origin = request.headers.get("origin") || request.headers.get("referer") || "";
     const shopDomain = url.searchParams.get("shop") || extractShopDomain(origin);
 
@@ -35,16 +43,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ error: "Cannot determine store" }, { status: 400, headers: corsHeaders });
     }
 
+    // Get store ID
     const { data: store } = await supabase
       .from("stores")
       .select("id, plan_status")
       .eq("shop_domain", shopDomain)
       .single();
 
-    if (!store || store.plan_status !== "active") {
-      return json({ ok: true }, { headers: corsHeaders });
+    if (!store || (store.plan_status !== "active" && store.plan_status !== "trialing")) {
+      return json({ ok: true }, { headers: corsHeaders }); // Silent fail for inactive stores
     }
 
+    // Capture the intent via Job Queue for background processing
     await enqueueAgentJob(store.id, "intent_capture", {
       email,
       query,
@@ -54,10 +64,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     return json({ ok: true }, { headers: corsHeaders });
   } catch {
-    return json({ ok: true }, { headers: corsHeaders });
+    return json({ ok: true }, { headers: corsHeaders }); // Never return errors to storefront pixel
   }
 };
 
+// CORS headers for cross-origin pixel requests
 export const loader = async (_args: LoaderFunctionArgs) => {
   return json(null, { headers: corsHeaders });
 };

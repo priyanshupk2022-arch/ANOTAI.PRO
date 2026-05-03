@@ -88,72 +88,65 @@ export default function AgentsPage() {
         <div className="page-header">
           <h1 className="page-title">Your AI Revenue Team</h1>
           <p className="page-subtitle">
-            Owner decides whether each agent works in Approval, Auto, or Locked mode.
+            Configure how each specialized agent operates. Approval mode is recommended for beta stores.
           </p>
         </div>
 
         {!storeReady && (
           <div style={warningStyle}>
-            Controls are visible, but saving modes needs the database/tunnel connection to be healthy.
+            Controls are visible, but saving modes needs the database connection to be healthy.
           </div>
         )}
         {actionData?.success && <div style={successStyle}>{actionData.success}</div>}
         {actionData?.error && <div style={errorStyle}>{actionData.error}</div>}
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <div className="agents-grid">
           {agents.map((agent) => {
             const profile = AGENT_PROFILES.find((item) => item.name === agent.name);
 
             return (
-              <div className="card" key={agent.name} style={{ marginBottom: 0 }}>
-                <div style={headerStyle}>
-                  <span style={agentBadge}>{agent.emoji}</span>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 18, fontWeight: 800, color: "#0F172A" }}>
-                      {agent.display_name}
-                    </div>
-                    <div style={{ fontSize: 13, color: "#64748B" }}>{profile?.description}</div>
-                  </div>
+              <div className="agent-card-premium" key={agent.name}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
+                  <div className="agent-icon-box" style={{ marginBottom: 0 }}>{agent.emoji}</div>
                   <ModePill mode={agent.mode} />
                 </div>
 
-                <div style={metricGrid}>
-                  <div style={metricBox}>
-                    <div style={metricValue}>{agent.today_actions}</div>
-                    <div style={metricLabel}>Actions Today</div>
+                <div style={{ marginBottom: '24px' }}>
+                  <h3 style={{ fontSize: '18px', fontWeight: 800, color: 'var(--navy)', marginBottom: '4px' }}>{agent.display_name}</h3>
+                  <p style={{ fontSize: '13px', color: 'var(--gray-500)', lineHeight: '1.4' }}>{profile?.description}</p>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '24px' }}>
+                  <div style={{ background: 'var(--gray-50)', padding: '12px', borderRadius: '8px', textAlign: 'center' }}>
+                    <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--navy)' }}>{agent.today_actions}</div>
+                    <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--gray-400)', textTransform: 'uppercase' }}>Actions</div>
                   </div>
-                  <div style={metricBox}>
-                    <div style={{ ...metricValue, color: "#22C55E" }}>
-                      ${(agent.revenue_impact || 0).toLocaleString()}
-                    </div>
-                    <div style={metricLabel}>Revenue Impact</div>
-                  </div>
-                  <div style={metricBox}>
-                    <div style={metricValue}>{modeLabel(agent.mode)}</div>
-                    <div style={metricLabel}>Owner Mode</div>
+                  <div style={{ background: 'var(--gray-50)', padding: '12px', borderRadius: '8px', textAlign: 'center' }}>
+                    <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--green)' }}>${(agent.revenue_impact || 0).toLocaleString()}</div>
+                    <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--gray-400)', textTransform: 'uppercase' }}>Impact</div>
                   </div>
                 </div>
 
-                <div style={explainBox}>
-                  <strong style={{ color: "#0F172A" }}>Mission:</strong> {profile?.mission}
-                  <br />
-                  <strong style={{ color: "#0F172A" }}>Auto allowed:</strong> {profile?.autoAllowed}
-                  <br />
-                  <strong style={{ color: "#0F172A" }}>Approval required:</strong>{" "}
-                  {profile?.approvalRequired}
+                <div style={{ borderTop: '1px solid var(--gray-100)', paddingTop: '16px', marginBottom: '20px' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--gray-600)', marginBottom: '8px' }}>
+                    <strong style={{ color: 'var(--navy)' }}>Mission:</strong> {profile?.mission}
+                  </div>
+                  <div style={{ fontSize: '12px', color: 'var(--gray-600)' }}>
+                    <strong style={{ color: 'var(--navy)' }}>Safety:</strong> {profile?.approvalRequired}
+                  </div>
                 </div>
 
-                <Form method="post" style={modeFormStyle}>
+                <Form method="post" style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
                   <input type="hidden" name="agent_name" value={agent.name} />
-                  <label style={selectLabelStyle}>
-                    Owner mode
-                    <select name="mode" defaultValue={agent.mode} style={selectStyle}>
-                      <option value="approval">Approval - owner reviews first</option>
-                      <option value="auto">Auto - execute inside safety limits</option>
-                      <option value="locked">Locked - monitor only</option>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ fontSize: '11px', fontWeight: 700, color: 'var(--gray-400)', textTransform: 'uppercase', marginBottom: '4px', display: 'block' }}>Owner Mode</label>
+                    <select name="mode" defaultValue={agent.mode} className="form-input" style={{ fontSize: '13px', height: '38px' }}>
+                      <option value="approval">Approval Mode</option>
+                      <option value="auto">Auto Mode</option>
+                      <option value="locked">Locked</option>
                     </select>
-                  </label>
-                  <button type="submit" style={saveButtonStyle}>Save Mode</button>
+                  </div>
+                  <button type="submit" className="btn-primary" style={{ height: '38px', padding: '0 12px', fontSize: '12px' }}>Save</button>
                 </Form>
               </div>
             );
@@ -172,9 +165,9 @@ function ModePill({ mode }: { mode: AgentMode }) {
   };
 
   return (
-    <div style={{ ...activePill, ...stylesByMode[mode] }}>
-      <div style={{ width: 6, height: 6, borderRadius: "50%", background: "currentColor" }} />
-      <span>{modeLabel(mode)}</span>
+    <div className="badge" style={{ ...stylesByMode[mode], padding: '4px 10px' }}>
+      <span className="status-dot active" style={{ backgroundColor: 'currentColor', marginRight: '6px' }} />
+      {modeLabel(mode)}
     </div>
   );
 }
@@ -184,107 +177,6 @@ function modeLabel(mode: AgentMode) {
   if (mode === "locked") return "Locked";
   return "Approval";
 }
-
-const headerStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 14,
-  marginBottom: 16,
-};
-
-const agentBadge: React.CSSProperties = {
-  width: 42,
-  height: 42,
-  display: "grid",
-  placeItems: "center",
-  borderRadius: 8,
-  background: "#0F172A",
-  color: "#FFFFFF",
-  fontSize: 13,
-  fontWeight: 900,
-};
-
-const activePill: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 6,
-  padding: "4px 12px",
-  borderRadius: 100,
-  fontSize: 12,
-  fontWeight: 800,
-};
-
-const metricGrid: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "1fr 1fr 1fr",
-  gap: 12,
-  marginBottom: 16,
-};
-
-const metricBox: React.CSSProperties = {
-  background: "#F8FAFC",
-  borderRadius: 8,
-  padding: "12px 16px",
-  textAlign: "center",
-};
-
-const metricValue: React.CSSProperties = {
-  fontSize: 22,
-  fontWeight: 800,
-  color: "#0F172A",
-};
-
-const metricLabel: React.CSSProperties = {
-  fontSize: 12,
-  color: "#94A3B8",
-};
-
-const explainBox: React.CSSProperties = {
-  background: "#F8FAFC",
-  borderRadius: 8,
-  padding: "12px 16px",
-  fontSize: 13,
-  color: "#475569",
-  lineHeight: 1.6,
-  marginBottom: 14,
-};
-
-const modeFormStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "1fr auto",
-  alignItems: "end",
-  gap: 12,
-};
-
-const selectLabelStyle: React.CSSProperties = {
-  display: "grid",
-  gap: 6,
-  color: "#334155",
-  fontSize: 12,
-  fontWeight: 800,
-};
-
-const selectStyle: React.CSSProperties = {
-  minHeight: 40,
-  border: "1px solid #CBD5E1",
-  borderRadius: 8,
-  padding: "0 12px",
-  fontSize: 14,
-  color: "#0F172A",
-  background: "#FFFFFF",
-};
-
-const saveButtonStyle: React.CSSProperties = {
-  minHeight: 40,
-  border: "none",
-  borderRadius: 8,
-  background: "#0F172A",
-  color: "#FFFFFF",
-  padding: "0 18px",
-  fontSize: 14,
-  fontWeight: 800,
-  cursor: "pointer",
-};
 
 const successStyle: React.CSSProperties = {
   background: "#DCFCE7",

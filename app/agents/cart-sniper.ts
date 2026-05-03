@@ -13,7 +13,7 @@ import { recordCustomerActivity, upsertCustomerProfile } from "~/services/custom
 import { sendEmail } from "~/services/email.server";
 import { createShopifyRecoveryDiscount } from "~/services/shopify-discounts.server";
 import { assertCanSendEmail } from "~/services/kill-switch.server";
-import { ErrorLogger } from "~/services/error-logger.server";
+import { askAgent } from "~/utils/gemini.server";
 
 // ─── Types ───────────────────────────────────────────────
 export interface CartEvent {
@@ -256,6 +256,23 @@ export async function executeRecovery(
   const code = generateDiscountCode();
   const expiresAt = new Date(Date.now() + ladder.expiry_minutes * 60000);
 
+  // AI-Powered Personalized Skincare Recovery Email
+  const cartSummary = cartEvent.cart_data.map(i => i.title).join(", ");
+  const aiPrompt = `You are a Skincare Expert. A customer left these items in their cart: ${cartSummary}.
+Write a short, empathetic recovery email. 
+Tone: Professional and helpful.
+Content: Remind them why these products are great for their skin. Mention that we've reserved a special discount code for them: ${code} (expires in ${ladder.expiry_minutes} mins).
+Avoid: Medical claims or aggressive sales pressure.
+Return only the HTML body of the email.`;
+
+  let emailHtml = "";
+  try {
+    emailHtml = await askAgent(storeId, aiPrompt);
+  } catch (error) {
+    console.warn("AI email generation failed, using fallback:", error);
+    emailHtml = buildRecoveryEmail(cartEvent, code, finalPct, expiresAt);
+  }
+
   const { data: claimedCart, error: claimError } = await supabase.from("cart_events").update({
     status: "sniped",
     recovery_sent: true,
@@ -304,7 +321,7 @@ export async function executeRecovery(
   const emailResult = await sendEmail({
     to: cartEvent.customer_email,
     subject: `Your ${finalPct}% recovery offer expires soon`,
-    html: buildRecoveryEmail(cartEvent, code, finalPct, expiresAt),
+    html: emailHtml,
     tags: [
       { name: "agent", value: "cart_sniper" },
       { name: "cart_event_id", value: cartEvent.id },
@@ -394,7 +411,7 @@ export async function getSniperMetrics(storeId: string, days = 30) {
 
   const total = events?.length || 0;
   const recovered = events?.filter((e) => e.status === "recovered").length || 0;
-  const revenue = actions?.reduce((sum, a) => sum + (a.revenue_impact || 0), 0) || 0;
+  const revenue = actions?.reduce((sum, a) => sum + (Number(a.revenue_impact) || 0), 0) || 0;
 
   return { total_detected: total, total_recovered: recovered, recovery_rate: total > 0 ? Math.round((recovered / total) * 100) : 0, revenue_recovered: revenue };
 }
@@ -440,8 +457,9 @@ async function releaseRecoveryClaim(storeId: string, cartEventId: string) {
 async function claimEmailEvent(
   storeId: string,
   cartEventId: string,
-  recipient: string
+  recipient: string | null
 ): Promise<EmailEvent | null> {
+  if (!recipient) return null;
   const { data: existing } = await supabase
     .from("email_events")
     .select("id, status")

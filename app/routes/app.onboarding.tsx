@@ -92,33 +92,33 @@ export default function OnboardingPage() {
                 stay controlled by the owner until the pilot is stable.
               </p>
             </div>
-            <Link to="/app/approvals" style={primaryButtonStyle}>Open Approvals</Link>
+            <Link to="/app/approvals" className="btn-primary">Open Approvals</Link>
           </div>
         </div>
 
         <div className="ops-grid">
-          <div className="ops-card">
-            <div className="ops-card-header">
-              <span>Readiness Checklist</span>
-              <strong>{readiness.readyCount}/{readiness.totalCount}</strong>
+          <div className="card">
+            <div className="ops-card-header" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
+              <span style={{ fontWeight: 800 }}>Readiness Checklist</span>
+              <strong style={{ fontSize: '13px', color: 'var(--primary)' }}>{readiness.readyCount}/{readiness.totalCount}</strong>
             </div>
             <div style={readinessListStyle}>
               {readinessItems.map((item) => (
                 <Link to={item.href || "/app/onboarding"} key={item.key} style={readinessItemStyle}>
-                  <span style={statusDotStyle(item.status)} />
+                  <div className={`status-dot ${item.status === 'ready' ? 'active' : item.status === 'manual' ? 'warning' : 'red'}`} />
                   <div>
-                    <strong style={itemTitleStyle}>{item.title}</strong>
-                    <p style={itemDetailStyle}>{item.detail}</p>
+                    <strong style={{ display: 'block', fontSize: '13px', color: 'var(--navy)', marginBottom: '4px' }}>{item.title}</strong>
+                    <p style={{ fontSize: '12px', color: 'var(--gray-500)', lineHeight: 1.4 }}>{item.detail}</p>
                   </div>
                 </Link>
               ))}
             </div>
           </div>
 
-          <div className="ops-card">
-            <div className="ops-card-header">
-              <span>Pilot Playbook</span>
-              <strong>10 stores max</strong>
+          <div className="card">
+            <div className="ops-card-header" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
+              <span style={{ fontWeight: 800 }}>Pilot Playbook</span>
+              <strong style={{ fontSize: '11px', color: 'var(--gray-400)', textTransform: 'uppercase' }}>10 stores max</strong>
             </div>
             <div style={playbookStyle}>
               {pilotSteps.map((step, index) => (
@@ -135,8 +135,8 @@ export default function OnboardingPage() {
           <h2 className="section-title">Founder Beta Promise</h2>
           <div style={promiseGridStyle}>
             <PromiseCard title="What they get" text="A 5-agent AI revenue team, founder onboarding, weekly reports, and approval-first revenue opportunities." />
-            <PromiseCard title="What stays controlled" text="No unlimited AI, no hidden customer emails, no unsafe discounts, and no fully autonomous risky campaigns during beta." />
-            <PromiseCard title="What to measure" text="Recovered revenue, margin risks blocked, customer signals captured, approval speed, and merchant feedback." />
+            <PromiseCard title="What stays controlled" text="No unlimited AI, no hidden customer emails, no unsafe discounts, and no risky campaigns during beta." />
+            <PromiseCard title="What to measure" text="Recovered revenue, margin risks blocked, customer signals captured, and merchant feedback." />
           </div>
         </div>
       </main>
@@ -147,8 +147,8 @@ export default function OnboardingPage() {
 function PromiseCard({ title, text }: { title: string; text: string }) {
   return (
     <div style={promiseCardStyle}>
-      <strong>{title}</strong>
-      <p>{text}</p>
+      <strong style={{ display: 'block', marginBottom: '8px', color: 'var(--navy)' }}>{title}</strong>
+      <p style={{ margin: 0, fontSize: '12px', color: 'var(--gray-500)', lineHeight: 1.5 }}>{text}</p>
     </div>
   );
 }
@@ -180,83 +180,47 @@ const eyebrowStyle: React.CSSProperties = {
 
 const heroTitleStyle: React.CSSProperties = {
   margin: "4px 0 8px",
-  color: "#0F172A",
+  color: "var(--navy)",
   fontSize: 28,
   lineHeight: 1.1,
+  fontWeight: 800,
 };
 
 const heroTextStyle: React.CSSProperties = {
   margin: 0,
-  color: "#64748B",
+  color: "var(--gray-500)",
   fontSize: 14,
   lineHeight: 1.55,
   maxWidth: 620,
 };
 
-const primaryButtonStyle: React.CSSProperties = {
-  flexShrink: 0,
-  display: "inline-flex",
-  alignItems: "center",
-  minHeight: 42,
-  padding: "11px 16px",
-  borderRadius: 8,
-  background: "#0F172A",
-  color: "#FFFFFF",
-  textDecoration: "none",
-  fontSize: 13,
-  fontWeight: 900,
-};
-
 const readinessListStyle: React.CSSProperties = {
   display: "grid",
-  gap: 10,
+  gap: 12,
 };
 
 const readinessItemStyle: React.CSSProperties = {
   display: "flex",
-  gap: 12,
+  gap: 16,
   alignItems: "flex-start",
-  padding: 12,
-  borderRadius: 10,
-  background: "#F8FAFC",
-  border: "1px solid #E2E8F0",
+  padding: '16px',
+  borderRadius: 12,
+  background: "var(--gray-50)",
+  border: "1px solid var(--gray-100)",
   textDecoration: "none",
-};
-
-const statusDotStyle = (status: string): React.CSSProperties => ({
-  width: 10,
-  height: 10,
-  borderRadius: 999,
-  marginTop: 5,
-  flexShrink: 0,
-  background:
-    status === "ready" ? "#22C55E" : status === "manual" ? "#F59E0B" : "#EF4444",
-});
-
-const itemTitleStyle: React.CSSProperties = {
-  display: "block",
-  color: "#0F172A",
-  fontSize: 13,
-  marginBottom: 4,
-};
-
-const itemDetailStyle: React.CSSProperties = {
-  margin: 0,
-  color: "#64748B",
-  fontSize: 12,
-  lineHeight: 1.45,
+  transition: 'all 0.2s ease',
 };
 
 const playbookStyle: React.CSSProperties = {
   display: "grid",
-  gap: 12,
+  gap: 16,
 };
 
 const playbookStepStyle: React.CSSProperties = {
   display: "flex",
-  gap: 12,
+  gap: 14,
   alignItems: "flex-start",
-  color: "#334155",
+  color: "var(--navy)",
   fontSize: 13,
   lineHeight: 1.45,
 };
@@ -276,16 +240,13 @@ const stepNumberStyle: React.CSSProperties = {
 
 const promiseGridStyle: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-  gap: 12,
+  gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+  gap: 16,
 };
 
 const promiseCardStyle: React.CSSProperties = {
-  border: "1px solid #E2E8F0",
-  borderRadius: 10,
-  background: "#F8FAFC",
-  padding: 14,
-  color: "#0F172A",
-  fontSize: 13,
-  lineHeight: 1.45,
+  border: "1px solid var(--gray-100)",
+  borderRadius: 12,
+  background: "var(--gray-50)",
+  padding: 16,
 };

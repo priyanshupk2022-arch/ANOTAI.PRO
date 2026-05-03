@@ -4,7 +4,7 @@
  * The Margin Guardian is the GATEKEEPER of ANOTAI.
  * No discount goes to the customer without Guardian's approval.
  * 
- * Rule: Minimum Price = COGS × 1.20 (ensures 20% minimum profit margin)
+ * Rule: Minimum Price = COGS × (1 + minMarginPct/100)
  */
 
 import { supabase } from "~/utils/supabase.server";
@@ -35,6 +35,18 @@ export interface ValidationResult {
     requested_discount_pct: number;
     discounted_price: number;
   }[];
+  requested_discount: number;
+  requested_discount_safe: boolean;
+  alternative_offer_type: "discount" | "bundle" | "free_shipping" | "no_discount_value_offer" | "none";
+  alternative_offer_value: string;
+  estimated_shipping_cost: number | null;
+  free_shipping_margin_safe: boolean;
+  auto_free_shipping_allowed: boolean;
+  final_estimated_profit: number;
+  final_estimated_margin: number;
+  auto_reply_allowed: boolean;
+  requires_merchant_approval: boolean;
+  customer_message_status: "sent" | "drafted" | "blocked";
 }
 
 export interface MarginReport {
@@ -57,14 +69,21 @@ export async function validateDiscount(
   storeId: string,
   variantIds: string[],
   currentPrices: Record<string, number>,
-  requestedDiscountPct: number
+  requestedDiscountPct: number,
+  merchantAutoApproveLimit: number = 15,
+  merchantAllowsAutoFreeShipping: boolean = false,
+  estimatedShippingCost: number | null = null
 ): Promise<ValidationResult> {
   const details: ValidationResult["details"] = [];
   let overallApproved = true;
   let minSafeDiscountPct = requestedDiscountPct;
+  
   const controls = await getOwnerControls(storeId);
   const minMarginPct = controls.safety.minMarginPct;
   const marginMultiplier = 1 + minMarginPct / 100;
+
+  let totalCurrentPrice = 0;
+  let totalCogs = 0;
 
   for (const variantId of variantIds) {
     // Fetch COGS for this variant
@@ -91,6 +110,9 @@ export async function validateDiscount(
     const discountedPrice = currentPrice * (1 - requestedDiscountPct / 100);
     const maxSafe = calculateMaxDiscount(currentPrice, cogs.cogs, minMarginPct);
 
+    totalCurrentPrice += currentPrice;
+    totalCogs += cogs.cogs;
+
     if (discountedPrice < minPrice) {
       overallApproved = false;
       minSafeDiscountPct = Math.min(minSafeDiscountPct, maxSafe);
@@ -107,6 +129,51 @@ export async function validateDiscount(
     });
   }
 
+  // Calculate Alternative Offer
+  let altOfferType: ValidationResult["alternative_offer_type"] = "none";
+  let altOfferValue = "0";
+  let freeShippingMarginSafe = false;
+  let finalEstimatedProfit = 0;
+  let finalEstimatedMargin = 0;
+
+  if (!overallApproved) {
+    if (minSafeDiscountPct > 0) {
+      altOfferType = "discount";
+      altOfferValue = Math.floor(minSafeDiscountPct).toString();
+      finalEstimatedProfit = (totalCurrentPrice * (1 - Math.floor(minSafeDiscountPct) / 100)) - totalCogs;
+      finalEstimatedMargin = totalCurrentPrice > 0 ? (finalEstimatedProfit / totalCurrentPrice) * 100 : 0;
+    } else {
+      altOfferType = "free_shipping";
+      altOfferValue = "free_shipping";
+      if (estimatedShippingCost !== null) {
+        finalEstimatedProfit = totalCurrentPrice - totalCogs - estimatedShippingCost;
+        finalEstimatedMargin = totalCurrentPrice > 0 ? (finalEstimatedProfit / totalCurrentPrice) * 100 : 0;
+        freeShippingMarginSafe = finalEstimatedMargin >= minMarginPct;
+      } else {
+        freeShippingMarginSafe = false;
+      }
+    }
+  } else {
+    altOfferType = "discount";
+    altOfferValue = requestedDiscountPct.toString();
+    finalEstimatedProfit = (totalCurrentPrice * (1 - requestedDiscountPct / 100)) - totalCogs;
+    finalEstimatedMargin = totalCurrentPrice > 0 ? (finalEstimatedProfit / totalCurrentPrice) * 100 : 0;
+  }
+
+  // Determine Auto Reply Rules
+  let autoReplyAllowed = false;
+  
+  if (overallApproved) {
+    autoReplyAllowed = true;
+  } else if (altOfferType === "discount") {
+    autoReplyAllowed = finalEstimatedMargin >= minMarginPct && Number(altOfferValue) <= merchantAutoApproveLimit;
+  } else if (altOfferType === "free_shipping") {
+    autoReplyAllowed = freeShippingMarginSafe && merchantAllowsAutoFreeShipping;
+  }
+
+  const requiresMerchantApproval = !autoReplyAllowed;
+  const messageStatus = autoReplyAllowed ? "sent" : "drafted";
+
   // Log this action
   await logGuardianAction(storeId, overallApproved, requestedDiscountPct, minSafeDiscountPct, details);
 
@@ -114,11 +181,23 @@ export async function validateDiscount(
     approved: overallApproved,
     max_safe_discount_pct: overallApproved ? requestedDiscountPct : Math.floor(minSafeDiscountPct),
     reason: overallApproved
-      ? `Discount approved. All products maintain ${minMarginPct}%+ margin.`
+      ? `✅ Discount approved. All products maintain ${minMarginPct}%+ margin.`
       : details.some((detail) => detail.cogs <= 0)
-        ? "COGS_MISSING"
-      : `Discount blocked. Would breach margin floor. Max safe discount: ${Math.floor(minSafeDiscountPct)}%`,
+        ? "⛔ Blocked: Missing COGS data."
+        : `⛔ Discount BLOCKED. Would breach margin floor. Max safe discount: ${Math.floor(minSafeDiscountPct)}%`,
     details,
+    requested_discount: requestedDiscountPct,
+    requested_discount_safe: overallApproved,
+    alternative_offer_type: altOfferType,
+    alternative_offer_value: altOfferValue,
+    estimated_shipping_cost: estimatedShippingCost,
+    free_shipping_margin_safe: freeShippingMarginSafe,
+    auto_free_shipping_allowed: merchantAllowsAutoFreeShipping,
+    final_estimated_profit: Math.round(finalEstimatedProfit * 100) / 100,
+    final_estimated_margin: Math.round(finalEstimatedMargin * 100) / 100,
+    auto_reply_allowed: autoReplyAllowed,
+    requires_merchant_approval: requiresMerchantApproval,
+    customer_message_status: overallApproved ? "sent" : messageStatus,
   };
 }
 
@@ -136,8 +215,8 @@ export function calculateMaxDiscount(currentPrice: number, cogs: number, minMarg
 /**
  * Get the minimum safe selling price for a variant.
  */
-export function getMinPrice(cogs: number): number {
-  return Math.ceil(cogs * 1.20 * 100) / 100; // Ceil to 2 decimals (always round up)
+export function getMinPrice(cogs: number, minMarginPct = 20): number {
+  return Math.ceil(cogs * (1 + minMarginPct / 100) * 100) / 100; // Ceil to 2 decimals (always round up)
 }
 
 // ─── COGS Data Functions ─────────────────────────────────
@@ -181,6 +260,9 @@ export async function upsertCOGS(
   productTitle: string,
   cogs: number
 ): Promise<COGSEntry | null> {
+  const controls = await getOwnerControls(storeId);
+  const minPrice = getMinPrice(cogs, controls.safety.minMarginPct);
+
   const { data, error } = await supabase
     .from("products_cogs")
     .upsert(
@@ -190,7 +272,7 @@ export async function upsertCOGS(
         variant_id: variantId,
         product_title: productTitle,
         cogs: cogs,
-        min_price: getMinPrice(cogs),
+        min_price: minPrice,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "store_id,variant_id" }
@@ -250,6 +332,8 @@ export async function getCOGSCoverage(storeId: string, totalProducts: number): P
  */
 export async function getMarginReport(storeId: string): Promise<MarginReport> {
   const allCogs = await getAllCOGS(storeId);
+  const controls = await getOwnerControls(storeId);
+  const minMargin = controls.safety.minMarginPct;
 
   if (allCogs.length === 0) {
     return {
@@ -269,17 +353,15 @@ export async function getMarginReport(storeId: string): Promise<MarginReport> {
   let atRisk = 0;
 
   for (const item of allCogs) {
-    // Margin percentage: how much above COGS is the min selling price
-    // min_price = COGS * 1.20, so margin = (min_price - COGS) / min_price * 100 = ~16.67% always
-    // Better metric: just report the 20% floor as the guaranteed margin
-    const margin = 20; // We guarantee minimum 20% margin on all products
+    // We guarantee minimum configured margin on all products
+    const margin = minMargin; 
     totalMargin += margin;
 
     if (margin < lowestMargin) {
       lowestMargin = margin;
       lowestProduct = item.product_title;
     }
-    if (margin < 25) atRisk++; // Less than 25% margin = at risk
+    if (margin < (minMargin + 5)) atRisk++; // Near the floor
   }
 
   return {

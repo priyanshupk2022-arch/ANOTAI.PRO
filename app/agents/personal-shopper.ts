@@ -82,7 +82,7 @@ export async function getSkincareConsultation(
   const controls = await getOwnerControls(storeId);
   const inStockCatalog = catalog.filter(isInStock);
   const requestedProduct = findRequestedProduct(input.requestedProductTitle, catalog);
-  const routine = buildRoutine(input, inStockCatalog, controls.playbook.defaultRoutineSteps);
+  const routine = buildRoutine(input, inStockCatalog, controls.playbook.defaultRoutineSteps || ROUTINE_STEPS);
   const alternatives =
     requestedProduct && !isInStock(requestedProduct)
       ? findAlternatives(requestedProduct, input, inStockCatalog)
@@ -635,13 +635,13 @@ export async function getShopperMetrics(storeId: string, days = 30) {
   const revenue =
     actions
       ?.filter((action) => action.action_type === "bundle_accepted")
-      .reduce((sum, action) => sum + (action.revenue_impact || 0), 0) || 0;
+      .reduce((sum, action) => sum + (Number(action.revenue_impact) || 0), 0) || 0;
 
   return {
-    total_impressions: impressions,
+    total_impressions: impressions + consultations,
     total_accepted: accepted,
     total_consultations: consultations,
-    acceptance_rate: impressions > 0 ? Math.round((accepted / impressions) * 100) : 0,
+    acceptance_rate: (impressions + consultations) > 0 ? Math.round((accepted / (impressions + consultations)) * 100) : 0,
     revenue_generated: revenue,
   };
 }

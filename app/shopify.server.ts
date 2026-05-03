@@ -2,6 +2,7 @@ import "@shopify/shopify-app-remix/adapters/node";
 import {
   ApiVersion,
   AppDistribution,
+  BillingInterval,
   shopifyApp,
 } from "@shopify/shopify-app-remix/server";
 import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
@@ -31,6 +32,13 @@ const shopify = shopifyApp({
   future: {
     unstable_newEmbeddedAuthStrategy: true,
     expiringOfflineAccessTokens: true,
+  },
+  billing: {
+    "Pro Plan": {
+      amount: 49.0,
+      currencyCode: "USD",
+      interval: BillingInterval.Every30Days as any,
+    },
   },
   hooks: {
     afterAuth: async ({ session }) => {

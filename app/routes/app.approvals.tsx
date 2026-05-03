@@ -78,12 +78,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 export default function ApprovalsPage() {
   const { approvals, recentDecisions, storeReady } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
-  const approvalItems = approvals.filter(
-    (approval): approval is NonNullable<(typeof approvals)[number]> => approval !== null
-  );
-  const decisionItems = recentDecisions.filter(
-    (approval): approval is NonNullable<(typeof recentDecisions)[number]> => approval !== null
-  );
+  
+  const approvalItems = (approvals || []).filter(Boolean);
+  const decisionItems = (recentDecisions || []).filter(Boolean);
 
   return (
     <div className="dashboard-layout">
@@ -98,22 +95,24 @@ export default function ApprovalsPage() {
         </div>
 
         {!storeReady && (
-          <div style={warningStyle}>
-            Approval queue needs the database/tunnel connection to be healthy.
+          <div className="badge badge-warning" style={{ width: '100%', padding: '16px', marginBottom: '24px', borderRadius: '12px' }}>
+            ⚠️ Sync pending. Approvals require an active database connection.
           </div>
         )}
-        {actionData?.success && <div style={successStyle}>{actionData.success}</div>}
-        {actionData?.error && <div style={errorStyle}>{actionData.error}</div>}
+        {actionData?.success && <div className="badge badge-success" style={{ width: '100%', padding: '16px', marginBottom: '24px', borderRadius: '12px' }}>{actionData.success}</div>}
+        {actionData?.error && <div className="badge badge-error" style={{ width: '100%', padding: '16px', marginBottom: '24px', borderRadius: '12px' }}>{actionData.error}</div>}
 
         <div className="card">
           <h2 className="section-title">Pending Actions ({approvalItems.length})</h2>
           {approvalItems.length === 0 ? (
-            <p style={{ color: "#94A3B8", fontSize: 14 }}>
-              No pending actions. Agents will send risky work here when approval mode or safety limits require it.
-            </p>
+            <div className="empty-state">
+              <span className="empty-state-icon">✨</span>
+              <div className="empty-state-title">Inbox Zero</div>
+              <p className="empty-state-text">No pending approvals. Your AI team is currently operating within your pre-approved safety zones.</p>
+            </div>
           ) : (
-            <div style={{ display: "grid", gap: 12 }}>
-              {approvalItems.map((approval) => (
+            <div style={{ display: "grid", gap: 16 }}>
+              {approvalItems.map((approval: any) => (
                 <ApprovalCard approval={approval} key={approval.id} />
               ))}
             </div>
@@ -121,19 +120,36 @@ export default function ApprovalsPage() {
         </div>
 
         <div className="card">
-          <h2 className="section-title">Recent Owner Decisions</h2>
-          {decisionItems.length === 0 ? (
-            <p style={{ color: "#94A3B8", fontSize: 14 }}>
-              Approved and blocked actions will appear here after the owner makes a decision.
-            </p>
-          ) : (
-            <div style={{ display: "grid", gap: 10 }}>
-              {decisionItems.map((approval) => (
+          <h2 className="section-title">🛡️ How Approvals Work</h2>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px' }}>
+            <div style={stepStyle}>
+              <div style={stepNum}>1</div>
+              <div style={{ fontWeight: 700, color: 'var(--navy)', marginBottom: '4px' }}>Agent Proposes</div>
+              <div style={{ fontSize: '12px', color: 'var(--gray-500)' }}>An agent finds a revenue opportunity (like a personalized bundle).</div>
+            </div>
+            <div style={stepStyle}>
+              <div style={stepNum}>2</div>
+              <div style={{ fontWeight: 700, color: 'var(--navy)', marginBottom: '4px' }}>Queue Review</div>
+              <div style={{ fontSize: '12px', color: 'var(--gray-500)' }}>The proposal appears here for your manual review and profit check.</div>
+            </div>
+            <div style={stepStyle}>
+              <div style={stepNum}>3</div>
+              <div style={{ fontWeight: 700, color: 'var(--navy)', marginBottom: '4px' }}>One-Click Deploy</div>
+              <div style={{ fontSize: '12px', color: 'var(--gray-500)' }}>Once approved, the offer goes live instantly to the customer.</div>
+            </div>
+          </div>
+        </div>
+
+        {decisionItems.length > 0 && (
+          <div className="card">
+            <h2 className="section-title">Recent Decisions</h2>
+            <div style={{ display: "grid", gap: 12 }}>
+              {decisionItems.map((approval: any) => (
                 <DecisionCard approval={approval} key={approval.id} />
               ))}
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </main>
     </div>
   );
@@ -144,33 +160,28 @@ function ApprovalCard({ approval }: { approval: any }) {
   const payload = approval.payload || {};
 
   return (
-    <div style={approvalCardStyle}>
-      <div style={approvalHeaderStyle}>
-        <span style={agentBadge}>{profile?.initials || "AI"}</span>
+    <div className="card" style={{ marginBottom: 0, border: '1px solid var(--gray-200)', background: 'var(--gray-50)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16 }}>
+        <div className="agent-icon-box" style={{ width: 42, height: 42, marginBottom: 0 }}>{profile?.initials || "AI"}</div>
         <div style={{ flex: 1 }}>
-          <div style={{ color: "#0F172A", fontSize: 16, fontWeight: 900 }}>
+          <div style={{ color: "var(--navy)", fontSize: 16, fontWeight: 800 }}>
             {profile?.displayName || approval.agent_name}
           </div>
-          <div style={{ color: "#64748B", fontSize: 13 }}>{humanize(approval.action_type)}</div>
+          <div style={{ color: "var(--gray-500)", fontSize: 12, textTransform: 'uppercase', fontWeight: 700, letterSpacing: 0.5 }}>{humanize(approval.action_type)}</div>
         </div>
-        <span style={pendingPill}>Pending</span>
+        <span className="badge badge-warning">Pending Review</span>
       </div>
 
-      <div style={detailsGridStyle}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginBottom: 16 }}>
         <Detail label="Reason" value={payload.reason || "Owner approval required."} />
         <Detail label="Discount" value={payload.discount_pct ? `${payload.discount_pct}%` : "N/A"} />
-        <Detail label="Revenue Impact" value={`$${Number(approval.revenue_impact || 0).toLocaleString()}`} />
-        <Detail label="Created" value={new Date(approval.created_at).toLocaleString()} />
+        <Detail label="Impact" value={`$${Number(approval.revenue_impact || 0).toLocaleString()}`} />
       </div>
 
-      <Form method="post" style={decisionRowStyle}>
+      <Form method="post" style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
         <input type="hidden" name="action_id" value={approval.id} />
-        <button type="submit" name="decision" value="approved" style={approveButtonStyle}>
-          Approve
-        </button>
-        <button type="submit" name="decision" value="blocked" style={blockButtonStyle}>
-          Block
-        </button>
+        <button type="submit" name="decision" value="blocked" className="btn-primary" style={{ background: 'var(--gray-200)', color: 'var(--navy)' }}>Block</button>
+        <button type="submit" name="decision" value="approved" className="btn-primary" style={{ background: 'var(--navy)' }}>Approve Action</button>
       </Form>
     </div>
   );
@@ -178,21 +189,20 @@ function ApprovalCard({ approval }: { approval: any }) {
 
 function DecisionCard({ approval }: { approval: any }) {
   const profile = AGENT_PROFILES.find((agent) => agent.name === approval.agent_name);
-  const payload = approval.payload || {};
   const isApproved = approval.status === "approved";
 
   return (
-    <div style={decisionCardStyle}>
-      <span style={agentBadge}>{profile?.initials || "AI"}</span>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px', background: 'var(--gray-50)', borderRadius: '10px', border: '1px solid var(--gray-100)' }}>
+      <div style={{ fontSize: '14px' }}>{profile?.initials || "AI"}</div>
       <div style={{ flex: 1 }}>
-        <div style={{ color: "#0F172A", fontSize: 14, fontWeight: 900 }}>
-          {profile?.displayName || approval.agent_name}
+        <div style={{ color: "var(--navy)", fontSize: 13, fontWeight: 700 }}>
+          {profile?.displayName || approval.agent_name} - {humanize(approval.action_type)}
         </div>
-        <div style={{ color: "#64748B", fontSize: 12 }}>
-          {humanize(approval.action_type)} - {payload.owner_decided_at ? new Date(payload.owner_decided_at).toLocaleString() : new Date(approval.created_at).toLocaleString()}
+        <div style={{ color: "var(--gray-400)", fontSize: 11 }}>
+          {new Date(approval.updated_at || approval.created_at).toLocaleString()}
         </div>
       </div>
-      <span style={isApproved ? approvedPill : blockedPill}>
+      <span className={`badge ${isApproved ? 'badge-success' : 'badge-error'}`} style={{ fontSize: '10px' }}>
         {isApproved ? "Approved" : "Blocked"}
       </span>
     </div>
@@ -201,11 +211,11 @@ function DecisionCard({ approval }: { approval: any }) {
 
 function Detail({ label, value }: { label: string; value: string }) {
   return (
-    <div style={detailBoxStyle}>
-      <div style={{ color: "#94A3B8", fontSize: 11, fontWeight: 900, textTransform: "uppercase" }}>
+    <div style={{ background: 'white', border: '1px solid var(--gray-100)', borderRadius: '8px', padding: '10px' }}>
+      <div style={{ color: "var(--gray-400)", fontSize: 10, fontWeight: 800, textTransform: "uppercase", marginBottom: 4 }}>
         {label}
       </div>
-      <div style={{ color: "#0F172A", fontSize: 13, fontWeight: 700 }}>{value}</div>
+      <div style={{ color: "var(--navy)", fontSize: 12, fontWeight: 700 }}>{value}</div>
     </div>
   );
 }
@@ -214,137 +224,22 @@ function humanize(value: string) {
   return value.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
-const approvalCardStyle: React.CSSProperties = {
-  border: "1px solid #E2E8F0",
-  borderRadius: 8,
-  padding: 16,
-  background: "#FFFFFF",
+const stepStyle: React.CSSProperties = {
+  background: 'var(--gray-50)',
+  padding: '20px',
+  borderRadius: '12px',
+  textAlign: 'center',
 };
 
-const approvalHeaderStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 12,
-  marginBottom: 14,
-};
-
-const agentBadge: React.CSSProperties = {
-  width: 38,
-  height: 38,
-  display: "grid",
-  placeItems: "center",
-  borderRadius: 8,
-  background: "#0F172A",
-  color: "#FFFFFF",
-  fontSize: 12,
-  fontWeight: 900,
-};
-
-const pendingPill: React.CSSProperties = {
-  borderRadius: 999,
-  background: "#FEF3C7",
-  color: "#92400E",
-  padding: "4px 10px",
-  fontSize: 12,
-  fontWeight: 900,
-};
-
-const approvedPill: React.CSSProperties = {
-  borderRadius: 999,
-  background: "#DCFCE7",
-  color: "#166534",
-  padding: "4px 10px",
-  fontSize: 12,
-  fontWeight: 900,
-};
-
-const blockedPill: React.CSSProperties = {
-  borderRadius: 999,
-  background: "#FEE2E2",
-  color: "#991B1B",
-  padding: "4px 10px",
-  fontSize: 12,
-  fontWeight: 900,
-};
-
-const decisionCardStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 12,
-  border: "1px solid #E2E8F0",
-  borderRadius: 8,
-  padding: 12,
-  background: "#FFFFFF",
-};
-
-const detailsGridStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-  gap: 10,
-  marginBottom: 14,
-};
-
-const detailBoxStyle: React.CSSProperties = {
-  background: "#F8FAFC",
-  border: "1px solid #E2E8F0",
-  borderRadius: 8,
-  padding: 10,
-};
-
-const decisionRowStyle: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "flex-end",
-  gap: 10,
-};
-
-const approveButtonStyle: React.CSSProperties = {
-  border: "none",
-  borderRadius: 8,
-  background: "#166534",
-  color: "#FFFFFF",
-  padding: "10px 16px",
-  fontSize: 14,
+const stepNum: React.CSSProperties = {
+  width: '28px',
+  height: '28px',
+  background: 'var(--navy)',
+  color: 'white',
+  borderRadius: '50%',
+  display: 'grid',
+  placeItems: 'center',
+  fontSize: '14px',
   fontWeight: 800,
-  cursor: "pointer",
-};
-
-const blockButtonStyle: React.CSSProperties = {
-  border: "none",
-  borderRadius: 8,
-  background: "#991B1B",
-  color: "#FFFFFF",
-  padding: "10px 16px",
-  fontSize: 14,
-  fontWeight: 800,
-  cursor: "pointer",
-};
-
-const successStyle: React.CSSProperties = {
-  background: "#DCFCE7",
-  color: "#166534",
-  padding: "12px 16px",
-  borderRadius: 8,
-  marginBottom: 24,
-  fontSize: 14,
-  fontWeight: 700,
-};
-
-const errorStyle: React.CSSProperties = {
-  background: "#FEE2E2",
-  color: "#991B1B",
-  padding: "12px 16px",
-  borderRadius: 8,
-  marginBottom: 24,
-  fontSize: 14,
-  fontWeight: 700,
-};
-
-const warningStyle: React.CSSProperties = {
-  background: "#FEF3C7",
-  color: "#92400E",
-  padding: "12px 16px",
-  borderRadius: 8,
-  marginBottom: 24,
-  fontSize: 14,
-  fontWeight: 700,
+  margin: '0 auto 12px',
 };

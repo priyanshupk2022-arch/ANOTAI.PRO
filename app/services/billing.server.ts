@@ -1,3 +1,10 @@
+/**
+ * 💳 BILLING SERVICE — $999/month Subscription Lock
+ * 
+ * Uses Shopify Billing API to create and manage recurring charges.
+ * No agent access without active $999/mo subscription.
+ */
+
 type AdminApiContext = {
   graphql: (query: string, options?: { variables?: Record<string, any> }) => Promise<Response>;
 };
@@ -7,9 +14,15 @@ const PLAN_PRICE = 999.0;
 const TRIAL_DAYS = 7;
 const BILLING_TEST_MODE = process.env.SHOPIFY_BILLING_TEST !== "false";
 
+/**
+ * Create a recurring charge and return the confirmation URL.
+ * Merchant must approve this on Shopify's payment page.
+ */
 export async function createBillingCharge(
   admin: AdminApiContext,
-  returnUrl: string
+  returnUrl: string,
+  planName: string = PLAN_NAME,
+  planPrice: number = PLAN_PRICE
 ): Promise<string> {
   const response = await admin.graphql(
     `#graphql
@@ -34,7 +47,7 @@ export async function createBillingCharge(
     }`,
     {
       variables: {
-        name: PLAN_NAME,
+        name: planName,
         returnUrl,
         trialDays: TRIAL_DAYS,
         test: BILLING_TEST_MODE,
@@ -42,7 +55,7 @@ export async function createBillingCharge(
           {
             plan: {
               appRecurringPricingDetails: {
-                price: { amount: PLAN_PRICE, currencyCode: "USD" },
+                price: { amount: planPrice, currencyCode: "USD" },
                 interval: "EVERY_30_DAYS",
               },
             },
@@ -66,9 +79,12 @@ export async function createBillingCharge(
   return result.confirmationUrl;
 }
 
+/**
+ * Check if the merchant has an active subscription to any of our plans.
+ */
 export async function checkBillingStatus(
   admin: AdminApiContext
-): Promise<{ active: boolean; subscription_id?: string; trial_days_remaining?: number }> {
+): Promise<{ active: boolean; subscription_id?: string; trial_days_remaining?: number; current_plan?: string }> {
   const response = await admin.graphql(
     `#graphql
     query {
@@ -107,26 +123,30 @@ export async function checkBillingStatus(
 
   const subs = data.data?.appInstallation?.activeSubscriptions || [];
   const activeSub = subs.find(
-    (subscription: any) => subscription.name === PLAN_NAME && subscription.status === "ACTIVE"
+    (s: any) => (s.name.includes("ANOTAI") || s.name.includes("Elite Agency")) && s.status === "ACTIVE"
   );
 
-  if (!activeSub) {
-    return { active: false };
+  if (activeSub) {
+    const periodEnd = new Date(activeSub.currentPeriodEnd);
+    const now = new Date();
+    const trialRemaining = activeSub.trialDays
+      ? Math.max(0, Math.ceil((periodEnd.getTime() - now.getTime()) / 86400000))
+      : 0;
+
+    return {
+      active: true,
+      subscription_id: activeSub.id,
+      trial_days_remaining: trialRemaining,
+      current_plan: activeSub.name
+    };
   }
 
-  const periodEnd = new Date(activeSub.currentPeriodEnd);
-  const now = new Date();
-  const trialRemaining = activeSub.trialDays
-    ? Math.max(0, Math.ceil((periodEnd.getTime() - now.getTime()) / 86400000))
-    : 0;
-
-  return {
-    active: true,
-    subscription_id: activeSub.id,
-    trial_days_remaining: trialRemaining,
-  };
+  return { active: false };
 }
 
+/**
+ * Cancel the merchant's subscription.
+ */
 export async function cancelSubscription(
   admin: AdminApiContext,
   subscriptionId: string

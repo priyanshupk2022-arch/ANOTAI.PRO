@@ -1,0 +1,40 @@
+<div id="anotai-chat-root" class="anotai-chat-wrapper">
+  <button id="anotai-chat-trigger" class="anotai-chat-bubble" aria-label="Talk to Skincare Expert">
+    <span class="anotai-icon">✨</span>
+    <span class="anotai-text">Expert Advice</span>
+  </button>
+
+  <div id="anotai-chat-window" class="anotai-chat-container hidden">
+    <div class="anotai-chat-header">
+      <div class="anotai-header-info">
+        <h3>Skincare Expert</h3>
+        <p>AI Powered Advice</p>
+      </div>
+      <button id="anotai-chat-close">&times;</button>
+    </div>
+    
+    <div id="anotai-chat-messages" class="anotai-chat-body">
+      <div class="anotai-message bot">
+        Hello! I'm your AI Skincare Assistant. What's on your mind today?
+      </div>
+    </div>
+
+    <div class="anotai-chat-footer">
+      <input type="text" id="anotai-chat-input" placeholder="Ask about skin concerns..." />
+      <button id="anotai-chat-send">Send</button>
+    </div>
+  </div>
+</div>
+
+<script src="{{ 'chat-widget.js' | asset_url }}" defer></script>
+{{ 'chat-widget.css' | asset_url | stylesheet_tag }}
+
+{% schema %}
+{
+  "name": "ANOTAI Chat Widget",
+  "target": "body",
+  "settings": [
+    { "type": "color", "id": "primary_color", "label": "Primary Color", "default": "#8B5CF6" }
+  ]
+}
+{% endschema %}

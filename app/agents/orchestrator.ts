@@ -1,3 +1,16 @@
+/**
+ * 🧠 ORCHESTRATOR — Central Agent Coordinator
+ * 
+ * Routes tasks to the correct agent, manages agent lifecycle,
+ * and provides unified status reporting.
+ * 
+ * 4 Core Microservices (Autonomous Revenue Flywheel):
+ * 1. 🛡️ Margin Guardian — Financial firewall
+ * 2. 🛍️ AI Personal Shopper — AOV booster
+ * 3. 🎯 Cart Sniper — Abandonment recovery
+ * 4. 🔮 Retention & Intent Engine — Post-purchase retargeting
+ */
+
 import { getSniperMetrics, processScheduledRecoveries } from "./cart-sniper";
 import { getShopperMetrics } from "./personal-shopper";
 import { getMarginReport } from "./margin-guardian";
@@ -18,6 +31,9 @@ export interface AgentStatus {
   revenue_impact: number;
 }
 
+/**
+ * Get current status of all 4 agents.
+ */
 export async function getAgentStatuses(storeId: string): Promise<AgentStatus[]> {
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
@@ -44,13 +60,13 @@ export async function getAgentStatuses(storeId: string): Promise<AgentStatus[]> 
     const name = action.agent_name as AgentName;
     if (agentMap[name]) {
       agentMap[name].count++;
-      agentMap[name].revenue += action.revenue_impact || 0;
+      agentMap[name].revenue += Number(action.revenue_impact) || 0;
     }
   });
 
   const colors: Record<AgentName, string> = {
     margin_guardian: "#10B981",
-    personal_shopper: "#2563EB",
+    personal_shopper: "#8B5CF6",
     cart_sniper: "#F59E0B",
     retention_engine: "#EC4899",
     revenue_analyst: "#0F172A",
@@ -72,6 +88,9 @@ export async function getAgentStatuses(storeId: string): Promise<AgentStatus[]> 
   });
 }
 
+/**
+ * Get full dashboard overview data.
+ */
 export async function getDashboardOverview(storeId: string) {
   const [agentStatuses, sniperMetrics, shopperMetrics, marginReport, intentMetrics] =
     await Promise.all([
@@ -82,16 +101,16 @@ export async function getDashboardOverview(storeId: string) {
       getIntentMetrics(storeId),
     ]);
 
-  const totalRevenueImpact = sniperMetrics.revenue_recovered + shopperMetrics.revenue_generated;
+  const totalRevenueImpact = (sniperMetrics.revenue_recovered || 0) + (shopperMetrics.revenue_generated || 0);
 
   return {
     agents: agentStatuses,
     metrics: {
       total_revenue_impact: totalRevenueImpact,
-      revenue_recovered: sniperMetrics.revenue_recovered,
-      aov_increase_pct: shopperMetrics.acceptance_rate,
-      intents_captured: intentMetrics.total_intents_captured,
-      vip_emails_sent: intentMetrics.targeted_emails_sent,
+      revenue_recovered: sniperMetrics.revenue_recovered || 0,
+      aov_increase_pct: shopperMetrics.acceptance_rate || 0,
+      intents_captured: intentMetrics.total_intents_captured || 0,
+      vip_emails_sent: intentMetrics.targeted_emails_sent || 0,
       margin_loss: 0,
     },
     sniper: sniperMetrics,
@@ -101,6 +120,9 @@ export async function getDashboardOverview(storeId: string) {
   };
 }
 
+/**
+ * Get recent activity feed for the dashboard.
+ */
 export async function getActivityFeed(storeId: string, limit = 20) {
   const { data } = await supabase
     .from("agent_actions")
@@ -120,6 +142,9 @@ export async function getActivityFeed(storeId: string, limit = 20) {
   }));
 }
 
+/**
+ * Process all scheduled agent tasks (called by cron).
+ */
 export async function processScheduledTasks(storeId: string) {
   return processScheduledRecoveries(storeId);
 }

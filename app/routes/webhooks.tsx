@@ -1,120 +1,143 @@
+/**
+ * 📡 WEBHOOK ENDPOINTS — Shopify Webhook Handlers (Phase 8 Hardened)
+ *
+ * Changes vs pre-Phase 8:
+ * - Idempotency check: duplicate webhook event IDs are skipped
+ * - Error logger integration: all failures are persisted to error_logs
+ * - Kill switch: automation_enabled is checked before processing
+ * - Silent errors log + still return 200 (Shopify requirement)
+ */
+
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { enqueueAgentJob } from "~/services/job-queue.server";
-import { removeStoreByShopDomain } from "~/utils/store.server";
-import {
-  getWebhookShopDomain,
-  getWebhookTopic,
-  verifyWebhookHMAC,
-} from "~/services/webhook-verify.server";
+import { verifyWebhookHMAC, getWebhookTopic, getWebhookShopDomain } from "~/services/webhook-verify.server";
+import { handleCartWebhook, markCartRecovered } from "~/agents/cart-sniper";
+import { executeVIPDrop } from "~/agents/retention-engine";
 import { supabase } from "~/utils/supabase.server";
+import { ErrorLogger } from "~/services/errorLogger.server";
+import { getStoreSafetySettings } from "~/services/killSwitch.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const rawBody = await request.text();
   const hmacHeader = request.headers.get("x-shopify-hmac-sha256") || "";
+  const shopifyEventId = request.headers.get("x-shopify-webhook-id") || "";
   const topic = getWebhookTopic(request.headers);
   const shopDomain = getWebhookShopDomain(request.headers);
 
+  // ── 1. HMAC Verification ──────────────────────────────────────────────
   if (!verifyWebhookHMAC(rawBody, hmacHeader)) {
-    console.error(`Webhook HMAC verification failed for ${topic} from ${shopDomain}`);
+    await ErrorLogger.webhook(null, topic, `HMAC verification failed for ${shopDomain}`, { shopDomain, topic });
     return json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // ── 2. Parse payload ──────────────────────────────────────────────────
   let payload: any;
   try {
     payload = JSON.parse(rawBody);
   } catch {
+    await ErrorLogger.webhook(null, topic, "Invalid JSON body", { shopDomain, topic });
     return json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  if (!topic || !shopDomain) {
-    console.warn("Webhook skipped because Shopify topic or shop header was missing.");
-    return json({ success: true, skipped: "missing_headers" });
-  }
-
-  const { data: store, error: storeError } = await supabase
+  // ── 3. Resolve store ──────────────────────────────────────────────────
+  const { data: store } = await supabase
     .from("stores")
     .select("id, plan_status")
     .eq("shop_domain", shopDomain)
-    .maybeSingle();
+    .single();
 
-  if (storeError) {
-    console.error(`Webhook store lookup failed for ${shopDomain}:`, storeError);
-    return json({ success: true, skipped: "store_lookup_failed" });
+  if (!store) {
+    if (topic !== "app/uninstalled") {
+      await ErrorLogger.webhook(null, topic, `Webhook for unknown store: ${shopDomain}`, { shopDomain, topic });
+      return json({ error: "Store not found" }, { status: 404 });
+    }
+    // For uninstall of unknown store, just return 200
+    return json({ success: true });
   }
 
-  if (!store && topic !== "app/uninstalled") {
-    console.warn(`Webhook skipped for unknown store: ${shopDomain}`);
-    return json({ success: true, skipped: "unknown_store" });
+  // ── 4. Idempotency check — skip already-processed events ─────────────
+  if (shopifyEventId) {
+    const { error: insertError } = await supabase.from("processed_webhooks").insert({
+      shopify_event_id: shopifyEventId,
+      store_id: store.id,
+      topic,
+    });
+
+    if (insertError) {
+      if (insertError.code === "23505") {
+        console.log(`[WEBHOOK_SPIKE] Duplicate event ${shopifyEventId} blocked (${topic})`);
+        return json({ success: true, skipped: true });
+      }
+      await ErrorLogger.webhook(store.id, topic, `DB Error: ${insertError.message}`, { shopifyEventId });
+    }
   }
 
+  // ── 5. Check store automation kill switch ─────────────────────────────
+  const safety = await getStoreSafetySettings(store.id);
+  if (!safety.automation_enabled && topic !== "app/uninstalled" && topic !== "app_subscriptions/update") {
+    console.log(`[KILL_SWITCH] Automation paused for ${shopDomain} — webhook ${topic} skipped`);
+    return json({ success: true, paused: true });
+  }
+
+  // ── 6. Route to agent ─────────────────────────────────────────────────
   try {
     switch (topic) {
       case "app_subscriptions/update":
-        if (!store) break;
-
         await syncBillingStatusFromWebhook(store.id, payload);
         break;
 
       case "carts/update":
-        if (!store || store.plan_status !== "active") break;
-
-        await enqueueAgentJob(store.id, "cart_update", {
-          cart_token: payload.token || payload.id,
-          customer_email: payload.email || null,
-          cart_items: (payload.line_items || []).map((item: any) => ({
+        if (store.plan_status !== "active") break;
+        await handleCartWebhook(
+          store.id,
+          payload.token || payload.id,
+          payload.email || null,
+          (payload.line_items || []).map((item: any) => ({
             product_id: String(item.product_id),
             variant_id: String(item.variant_id),
             title: item.title,
-            price: Number(item.price || 0),
+            price: parseFloat(item.price),
             quantity: item.quantity,
             image_url: item.image?.src || null,
-          })),
-        }, new Date(), `cart_update:${payload.token || payload.id}`);
+          }))
+        );
         break;
 
       case "orders/create":
-        if (!store || store.plan_status !== "active") break;
-
-        await enqueueAgentJob(store.id, "order_create", {
-          cart_token: payload.cart_token,
-          order_id: String(payload.id),
-          order_total: Number(payload.total_price || 0),
-        }, new Date(), `order_create:${payload.id}`);
+        if (store.plan_status !== "active") break;
+        if (payload.cart_token) {
+          await markCartRecovered(store.id, payload.cart_token, String(payload.id), parseFloat(payload.total_price || "0"));
+        }
         break;
 
       case "app/uninstalled":
-        await removeStoreByShopDomain(shopDomain);
+        await supabase.from("stores").delete().eq("id", store.id);
+        console.log(`🗑️ Store ${shopDomain} uninstalled — all data deleted`);
         break;
 
       case "products/update":
-        if (!store || store.plan_status !== "active") break;
-
-        await enqueueAgentJob(store.id, "product_update", {
-          product_id: String(payload.id),
-          title: payload.title || "",
-        }, new Date(), `product_update:${payload.id}`);
+        for (const variant of (payload.variants || [])) {
+          const inStock = variant.inventory_management === null || variant.inventory_quantity > 0;
+          await supabase.from("products_cogs")
+            .update({ product_title: `${payload.title} - ${variant.title}`, is_in_stock: inStock, updated_at: new Date().toISOString() })
+            .eq("store_id", store.id)
+            .eq("variant_id", String(variant.id));
+        }
         break;
 
       case "products/create":
-        if (!store || store.plan_status !== "active") break;
-
-        await enqueueAgentJob(store.id, "product_create", {
-          product_id: String(payload.id),
-          title: payload.title || "",
-          description: payload.body_html || "",
-          tags: payload.tags ? payload.tags.split(", ") : [],
-          price: Number(payload.variants?.[0]?.price || 0),
-          product_url: `https://${shopDomain}/products/${payload.handle}`,
-          product_image: payload.images?.[0]?.src || payload.image?.src || "",
-        }, new Date(), `product_create:${payload.id}`);
+        if (store.plan_status !== "active") break;
+        const productUrl = `https://${shopDomain}/products/${payload.handle}`;
+        const productImage = payload.images?.[0]?.src || payload.image?.src || "";
+        await executeVIPDrop(store.id, String(payload.id), payload.title || "", payload.body_html || "", payload.tags ? payload.tags.split(", ") : [], parseFloat(payload.variants?.[0]?.price || "0"), productUrl, productImage);
         break;
 
       default:
-        console.log(`Unhandled webhook topic: ${topic}`);
+        console.log(`[WEBHOOK] Unhandled topic: ${topic}`);
     }
-  } catch (error) {
-    console.error(`Webhook queue error (${topic}):`, error);
+  } catch (error: any) {
+    await ErrorLogger.webhook(store.id, topic, error, { shopDomain, payload_id: payload?.id });
+    console.error(`❌ Webhook error (${topic}):`, error);
   }
 
   return json({ success: true });

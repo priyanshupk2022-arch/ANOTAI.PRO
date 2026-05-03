@@ -187,65 +187,80 @@ export default function COGSManager() {
         </div>
 
         {!storeReady && (
-          <div style={warningStyle}>
-            Store data is not connected right now. You can view this page, but saving costs needs the
-            database/tunnel connection to be healthy.
+          <div className="badge badge-warning" style={{ width: '100%', padding: '16px', marginBottom: '24px', borderRadius: '12px' }}>
+            ⚠️ Store data is not connected. Database connection is required to save costs.
           </div>
         )}
-        {actionData?.success && <div style={successStyle}>{actionData.success}</div>}
-        {actionData?.error && <div style={errorStyle}>{actionData.error}</div>}
 
-        <div className="card">
-          <h2 className="section-title">Add Product Cost</h2>
-          <Form method="post" style={formGridStyle}>
-            <input type="hidden" name="intent" value="add_single" />
-            <input name="product_id" placeholder="Product ID" required style={inputStyle} />
-            <input name="variant_id" placeholder="Variant ID" required style={inputStyle} />
-            <input name="product_title" placeholder="Product name" required style={{ ...inputStyle, gridColumn: "1 / -1" }} />
-            <input name="cogs" type="number" step="0.01" min="0.01" placeholder="Cost in USD" required style={inputStyle} />
-            <button type="submit" style={btnStyle}>Save Cost</button>
-          </Form>
+        {actionData?.success && <div className="badge badge-success" style={{ width: '100%', padding: '16px', marginBottom: '24px', borderRadius: '12px' }}>{actionData.success}</div>}
+        {actionData?.error && <div className="badge badge-error" style={{ width: '100%', padding: '16px', marginBottom: '24px', borderRadius: '12px' }}>{actionData.error}</div>}
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '32px', marginBottom: '40px' }}>
+          <div className="card" style={{ marginBottom: 0 }}>
+            <h2 className="section-title">💰 Add Product Cost</h2>
+            <Form method="post" style={{ display: 'grid', gap: '16px' }}>
+              <input type="hidden" name="intent" value="add_single" />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <input name="product_id" placeholder="Product ID" required className="form-input" />
+                <input name="variant_id" placeholder="Variant ID" required className="form-input" />
+              </div>
+              <input name="product_title" placeholder="Product Name" required className="form-input" />
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <input name="cogs" type="number" step="0.01" min="0.01" placeholder="Cost (USD)" required className="form-input" style={{ flex: 1 }} />
+                <button type="submit" className="btn-primary">Save Cost</button>
+              </div>
+            </Form>
+          </div>
+
+          <div className="card" style={{ marginBottom: 0 }}>
+            <h2 className="section-title">📄 Bulk CSV Import</h2>
+            <p style={{ fontSize: '13px', color: 'var(--gray-500)', marginBottom: '16px' }}>
+              Format: <code>product_id, variant_id, product_title, cogs</code>
+            </p>
+            <Form method="post">
+              <input type="hidden" name="intent" value="bulk_csv" />
+              <textarea
+                name="csv_data"
+                rows={4}
+                placeholder={"12345, 67890, Classic Tee, 8.50\n12346, 67891, Leather Bag, 45.00"}
+                className="form-input"
+                style={{ fontFamily: 'monospace', resize: 'none' }}
+              />
+              <button type="submit" className="btn-primary" style={{ marginTop: '16px' }}>Import CSV</button>
+            </Form>
+          </div>
         </div>
 
         <div className="card">
-          <h2 className="section-title">Bulk CSV Import</h2>
-          <p style={helperTextStyle}>
-            Use this format: <code style={codeStyle}>product_id, variant_id, product_title, cogs</code>
-          </p>
-          <Form method="post">
-            <input type="hidden" name="intent" value="bulk_csv" />
-            <textarea
-              name="csv_data"
-              rows={6}
-              placeholder={"product_id, variant_id, product_title, cogs\n12345, 67890, Classic Tee, 8.50\n12346, 67891, Leather Bag, 45.00"}
-              style={{ ...inputStyle, width: "100%", fontFamily: "monospace", fontSize: 13 }}
-            />
-            <button type="submit" style={{ ...btnStyle, marginTop: 12 }}>Import CSV</button>
-          </Form>
-        </div>
-
-        <div className="card">
-          <h2 className="section-title">Product Costs ({cogsData.length} products)</h2>
+          <h2 className="section-title">📦 Product Costs List ({cogsData.length})</h2>
           {cogsData.length === 0 ? (
-            <p style={{ color: "#94A3B8", fontSize: 14 }}>No product costs added yet.</p>
+            <div className="empty-state">
+              <span className="empty-state-icon">📋</span>
+              <div className="empty-state-title">No costs added yet</div>
+              <p className="empty-state-text">Add your first product cost above to enable Margin Guardian protection.</p>
+            </div>
           ) : (
-            <div style={{ overflowX: "auto" }}>
-              <table style={tableStyle}>
+            <div style={{ overflowX: 'auto' }}>
+              <table className="data-table">
                 <thead>
-                  <tr style={{ borderBottom: "1px solid #E2E8F0" }}>
-                    <th style={thStyle}>Product</th>
-                    <th style={thStyle}>COGS</th>
-                    <th style={thStyle}>Minimum Safe Price</th>
-                    <th style={thStyle}>Margin Rule</th>
+                  <tr>
+                    <th>Product</th>
+                    <th>COGS</th>
+                    <th>Min. Safe Price</th>
+                    <th>Margin Rule</th>
                   </tr>
                 </thead>
                 <tbody>
                   {cogsData.map((item: any) => (
-                    <tr key={item.id} style={{ borderBottom: "1px solid #F1F5F9" }}>
-                      <td style={tdStyle}>{item.product_title}</td>
-                      <td style={tdStyle}>${Number(item.cogs).toFixed(2)}</td>
-                      <td style={tdStyle}>${Number(item.min_price).toFixed(2)}</td>
-                      <td style={tdStyle}><span style={{ color: "#166534", fontWeight: 700 }}>20% floor</span></td>
+                    <tr key={item.id}>
+                      <td style={{ fontWeight: 600, color: 'var(--navy)' }}>{item.product_title}</td>
+                      <td>${Number(item.cogs).toFixed(2)}</td>
+                      <td>
+                        <span className="badge badge-success">${Number(item.min_price).toFixed(2)}</span>
+                      </td>
+                      <td>
+                        <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--primary)' }}>20% FLOOR</span>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -257,93 +272,3 @@ export default function COGSManager() {
     </div>
   );
 }
-
-const formGridStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "1fr 1fr",
-  gap: 12,
-};
-
-const inputStyle: React.CSSProperties = {
-  padding: "10px 14px",
-  border: "1px solid #E2E8F0",
-  borderRadius: 8,
-  fontSize: 14,
-  fontFamily: "'DM Sans', sans-serif",
-  outline: "none",
-};
-
-const btnStyle: React.CSSProperties = {
-  padding: "10px 20px",
-  background: "#0F172A",
-  color: "#FFFFFF",
-  border: "none",
-  borderRadius: 8,
-  fontSize: 14,
-  fontWeight: 700,
-  cursor: "pointer",
-  fontFamily: "'DM Sans', sans-serif",
-};
-
-const helperTextStyle: React.CSSProperties = {
-  fontSize: 13,
-  color: "#64748B",
-  marginBottom: 12,
-};
-
-const codeStyle: React.CSSProperties = {
-  background: "#F1F5F9",
-  padding: "2px 6px",
-  borderRadius: 4,
-};
-
-const tableStyle: React.CSSProperties = {
-  width: "100%",
-  borderCollapse: "collapse",
-  fontSize: 14,
-};
-
-const thStyle: React.CSSProperties = {
-  textAlign: "left",
-  padding: "10px 12px",
-  fontSize: 12,
-  fontWeight: 700,
-  color: "#64748B",
-  textTransform: "uppercase",
-  letterSpacing: 0.5,
-};
-
-const tdStyle: React.CSSProperties = {
-  padding: "10px 12px",
-  color: "#1E293B",
-};
-
-const successStyle: React.CSSProperties = {
-  background: "#DCFCE7",
-  color: "#166534",
-  padding: "12px 16px",
-  borderRadius: 8,
-  marginBottom: 24,
-  fontSize: 14,
-  fontWeight: 700,
-};
-
-const errorStyle: React.CSSProperties = {
-  background: "#FEE2E2",
-  color: "#991B1B",
-  padding: "12px 16px",
-  borderRadius: 8,
-  marginBottom: 24,
-  fontSize: 14,
-  fontWeight: 700,
-};
-
-const warningStyle: React.CSSProperties = {
-  background: "#FEF3C7",
-  color: "#92400E",
-  padding: "12px 16px",
-  borderRadius: 8,
-  marginBottom: 24,
-  fontSize: 14,
-  fontWeight: 700,
-};

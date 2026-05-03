@@ -15,7 +15,7 @@ import { ensureStoreForSession } from "~/utils/store.server";
 import { AppSidebar } from "~/components/AppSidebar";
 import "~/styles/dashboard.css";
 
-const DASHBOARD_DATA_TIMEOUT_MS = 5000;
+const DASHBOARD_DATA_TIMEOUT_MS = 15000;
 
 function getFallbackOverview() {
   return {
@@ -295,7 +295,7 @@ export default function Dashboard() {
                 : "Start billing or keep demo/test mode active before giving this to a real customer."}
             </p>
           </div>
-          <Link to={billingActive ? "/app/onboarding" : "/app/billing"}>
+          <Link to={billingActive ? "/app/onboarding" : "/app/billing"} className="btn-primary">
             {billingActive ? "Open onboarding" : "Start billing"}
           </Link>
         </div>
@@ -319,12 +319,12 @@ export default function Dashboard() {
         </div>
 
         <div className="ops-grid">
-          <div className="ops-card">
-            <div className="ops-card-header">
-              <span>Customer Signals</span>
-              <strong>Last 7 days</strong>
+          <div className="card">
+            <div className="ops-card-header" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
+              <span style={{ fontWeight: 800 }}>Customer Signals</span>
+              <strong style={{ fontSize: '11px', color: 'var(--gray-400)', textTransform: 'uppercase' }}>Last 7 days</strong>
             </div>
-            <div className="signal-grid">
+            <div className="signal-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
               <SignalMetric label="Customers known" value={customerSignals.customers} />
               <SignalMetric label="Search intents" value={customerSignals.searches7d} />
               <SignalMetric label="Abandoned carts" value={customerSignals.abandonedCarts7d} />
@@ -332,12 +332,12 @@ export default function Dashboard() {
             </div>
           </div>
 
-          <div className="ops-card">
-            <div className="ops-card-header">
-              <span>Worker Health</span>
-              <strong className={queueHealth.failed > 0 ? "danger-text" : ""}>{queueHealth.status}</strong>
+          <div className="card">
+            <div className="ops-card-header" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
+              <span style={{ fontWeight: 800 }}>Worker Health</span>
+              <strong style={{ fontSize: '11px', color: queueHealth.failed > 0 ? 'var(--red)' : 'var(--green)', textTransform: 'uppercase' }}>{queueHealth.status}</strong>
             </div>
-            <div className="signal-grid">
+            <div className="signal-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
               <SignalMetric label="Pending jobs" value={queueHealth.pending} />
               <SignalMetric label="Processing" value={queueHealth.processing} />
               <SignalMetric label="Done today" value={queueHealth.completedToday} />
@@ -350,14 +350,14 @@ export default function Dashboard() {
         {overview?.agents && (
           <div className="agents-grid">
             {overview.agents.map((a: any) => (
-              <div className="agent-card" key={a.name}>
-                <div className="agent-card-header">
-                  <span className="agent-card-emoji">{a.emoji}</span>
-                  <span className="agent-card-name">{a.display_name}</span>
-                  <div className="agent-card-status" />
+              <div className="agent-card-premium" key={a.name}>
+                <div className="agent-card-header" style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+                  <div className="agent-icon-box" style={{ marginBottom: 0, width: '32px', height: '32px', fontSize: '14px' }}>{a.emoji}</div>
+                  <span style={{ fontWeight: 700, fontSize: '13px' }}>{a.display_name}</span>
+                  <div className="status-dot active" style={{ marginLeft: 'auto', marginRight: 0 }} />
                 </div>
-                <div className="agent-card-metric">{a.today_actions}</div>
-                <div className="agent-card-label">actions today</div>
+                <div style={{ fontSize: '28px', fontWeight: 800 }}>{a.today_actions}</div>
+                <div style={{ fontSize: '11px', color: 'var(--gray-400)', textTransform: 'uppercase', fontWeight: 700 }}>actions today</div>
               </div>
             ))}
           </div>
@@ -365,7 +365,7 @@ export default function Dashboard() {
 
         {/* Activity Feed */}
         <div className="feed-section">
-          <h2 className="section-title">Live Activity</h2>
+          <h2 className="section-title">Live Activity Feed</h2>
           <div className="feed-list">
             {feedItems.length === 0 ? (
               <div className="feed-empty">No activity yet. Your agents are standing by.</div>
@@ -373,10 +373,10 @@ export default function Dashboard() {
               const d = toPlain(item);
               return (
                 <div className="feed-item" key={item.id}>
-                  <div className={`feed-dot ${d.dot}`} />
-                  {d.amt && <span className="feed-amount">{d.amt}</span>}
-                  <span className="feed-text">{d.text}</span>
-                  <span className="feed-time">{timeAgo(item.time)}</span>
+                  <div className={`status-dot ${d.dot === 'red' ? 'red' : d.dot === 'amber' ? 'warning' : 'active'}`} />
+                  {d.amt && <span style={{ fontWeight: 800, color: 'var(--green)', marginRight: '12px' }}>{d.amt}</span>}
+                  <span style={{ fontSize: '14px' }}>{d.text}</span>
+                  <span style={{ marginLeft: 'auto', fontSize: '12px', color: 'var(--gray-400)' }}>{timeAgo(item.time)}</span>
                 </div>
               );
             })}
@@ -384,22 +384,24 @@ export default function Dashboard() {
         </div>
 
         {/* Battery Inventory */}
-        <div className="inventory-section">
+        <div className="inventory-section" style={{ marginTop: '40px' }}>
           <h2 className="section-title">Inventory Watch</h2>
           <div className="inventory-grid">
             {inventory.map((item: any, i: number) => {
               const p = battPct(item.stock, item.maxStock);
               const c = battCls(p);
               return (
-                <div className={`inventory-item ${p <= 10 ? "critical" : ""}`} key={i}>
-                  <div className="battery">
-                    <div className={`battery-fill ${c}`} style={{ width: `${Math.max(p, 5)}%` }} />
+                <div className="card" style={{ padding: '16px', marginBottom: '12px' }} key={i}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+                    <div className="battery">
+                      <div className={`battery-fill ${c}`} style={{ width: `${Math.max(p, 5)}%` }} />
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: 700 }}>{item.name}</div>
+                      <div style={{ fontSize: '12px', color: p <= 10 ? 'var(--red)' : 'var(--gray-500)' }}>{item.stock} units ({p}%)</div>
+                    </div>
+                    {p <= 10 && <button className="btn-primary" style={{ marginLeft: 'auto', background: 'var(--red)' }}>Restock Action Required</button>}
                   </div>
-                  <div className="inventory-info">
-                    <div className="inventory-name">{item.name}</div>
-                    <div className={`inventory-stock ${p <= 10 ? "critical" : ""}`}>{item.stock} units ({p}%)</div>
-                  </div>
-                  {p <= 10 && <button className="restock-btn">Restock Action Required</button>}
                 </div>
               );
             })}
@@ -414,29 +416,19 @@ function DemoDataPanel({ demoStatus }: { demoStatus: string | null }) {
   return (
     <div className="demo-data-panel">
       <div>
-        <span className="readiness-label">Customer demo data</span>
         <strong>Make the app look alive in one click</strong>
-        <p>
-          Adds sample COGS, customer signals, carts, approvals, jobs, and revenue impact.
-          Clear removes only ANOTAI demo rows.
-        </p>
-        {demoStatus === "seeded" && <p className="demo-data-result">Sample demo data loaded.</p>}
-        {demoStatus === "cleared" && <p className="demo-data-result">Sample demo data cleared.</p>}
-        {demoStatus === "store_sync_failed" && (
-          <p className="demo-data-result error">Store connection was slow. Refresh and try again.</p>
-        )}
-        {demoStatus === "seed_failed" && (
-          <p className="demo-data-result error">Sample data could not be loaded. Existing demo data is still safe.</p>
-        )}
+        <p>Adds sample COGS, customer signals, carts, approvals, jobs, and revenue impact.</p>
+        {demoStatus === "seeded" && <p className="demo-data-result" style={{ color: 'var(--green)', fontWeight: 700 }}>Sample demo data loaded.</p>}
+        {demoStatus === "cleared" && <p className="demo-data-result" style={{ color: 'var(--gray-500)', fontWeight: 700 }}>Sample demo data cleared.</p>}
       </div>
-      <div className="demo-data-actions">
+      <div className="demo-data-actions" style={{ display: 'flex', gap: '8px' }}>
         <Form action="/app/demo-data" method="post">
           <input type="hidden" name="intent" value="seed" />
-          <button type="submit">Load sample data</button>
+          <button type="submit" className="btn-primary" style={{ background: 'var(--navy)' }}>Load sample data</button>
         </Form>
         <Form action="/app/demo-data" method="post">
           <input type="hidden" name="intent" value="clear" />
-          <button type="submit" className="secondary">Clear sample</button>
+          <button type="submit" className="btn-primary" style={{ background: 'white', color: 'var(--navy)', border: '1px solid var(--gray-200)' }}>Clear sample</button>
         </Form>
       </div>
     </div>
@@ -457,7 +449,7 @@ function LaunchChecklist({
       status: billingActive ? "ready" : "manual",
       detail: billingActive
         ? "Shopify subscription is active."
-        : "Use Shopify Billing test mode for dev stores, then switch live for paid customers.",
+        : "Use Shopify Billing test mode for dev stores.",
       href: "/app/billing",
     },
     ...readiness.items.filter((item) =>
@@ -467,20 +459,20 @@ function LaunchChecklist({
 
   return (
     <div className="launch-checklist">
-      <div className="launch-checklist-header">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
         <div>
           <span className="readiness-label">Reviewer-safe setup</span>
-          <strong>{readiness.readyCount}/{readiness.totalCount || 7} ready</strong>
+          <h2 className="section-title" style={{ marginBottom: 0 }}>{readiness.readyCount}/{readiness.totalCount || 7} ready</h2>
         </div>
-        <Link to="/app/onboarding">Full checklist</Link>
+        <Link to="/app/onboarding" style={{ fontSize: '13px', fontWeight: 700, color: 'var(--primary)' }}>Full checklist →</Link>
       </div>
       <div className="launch-checklist-grid">
         {importantItems.map((item) => (
           <Link to={item.href || "/app/onboarding"} className="launch-check-item" key={item.key}>
-            <span className={`launch-status ${item.status}`} />
+            <div className={`launch-status ${item.status}`} />
             <div>
-              <strong>{item.title}</strong>
-              <p>{item.detail}</p>
+              <strong style={{ fontSize: '13px' }}>{item.title}</strong>
+              <p style={{ fontSize: '11px', lineHeight: 1.4 }}>{item.detail}</p>
             </div>
           </Link>
         ))}
@@ -499,9 +491,9 @@ function SignalMetric({
   tone?: "normal" | "danger";
 }) {
   return (
-    <div className={`signal-metric ${tone}`}>
-      <span>{label}</span>
-      <strong>{value.toLocaleString("en-US")}</strong>
+    <div style={{ padding: '12px', background: 'var(--gray-50)', borderRadius: '8px' }}>
+      <div style={{ fontSize: '11px', color: 'var(--gray-400)', textTransform: 'uppercase', fontWeight: 700, marginBottom: '4px' }}>{label}</div>
+      <div style={{ fontSize: '20px', fontWeight: 800, color: tone === 'danger' ? 'var(--red)' : 'var(--navy)' }}>{value.toLocaleString("en-US")}</div>
     </div>
   );
 }
@@ -514,10 +506,11 @@ const approvalBannerStyle: React.CSSProperties = {
   background: "#FEF3C7",
   color: "#92400E",
   border: "1px solid #F59E0B",
-  borderRadius: 8,
-  padding: "12px 16px",
-  marginBottom: 24,
+  borderRadius: 12,
+  padding: "16px 20px",
+  marginBottom: 32,
   textDecoration: "none",
   fontSize: 14,
   fontWeight: 800,
+  boxShadow: 'var(--shadow-sm)'
 };

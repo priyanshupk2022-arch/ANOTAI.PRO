@@ -1,27 +1,12 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, Link, useActionData, useLoaderData } from "@remix-run/react";
+import { Form, useActionData, useLoaderData } from "@remix-run/react";
 import { AppSidebar } from "~/components/AppSidebar";
 import { createBillingCharge, checkBillingStatus } from "~/services/billing.server";
 import { authenticate } from "~/shopify.server";
 import { supabase } from "~/utils/supabase.server";
 import { ensureStoreForSession } from "~/utils/store.server";
 import "~/styles/dashboard.css";
-
-const starterAgents = [
-  ["MG", "Margin Guardian", "Blocks discounts that would break the profit floor."],
-  ["CS", "Cart Sniper", "Queues abandoned-cart recovery with owner approval."],
-  ["PS", "AI Personal Shopper", "Finds high-fit bundles and AOV opportunities."],
-  ["RE", "Retention Engine", "Matches customer intent with future product drops."],
-  ["RA", "Revenue Analyst", "Turns activity into a plain-English operator report."],
-];
-
-const betaIncludes = [
-  "7-day Shopify billing trial in dev/test mode",
-  "Approval-first setup for customer emails and discounts",
-  "COGS-based margin protection before offers go live",
-  "Founder-led onboarding for the first beta stores",
-];
 
 type ActionResult = { error?: string };
 
@@ -31,6 +16,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     console.warn("Billing store sync fallback used:", error);
     return null;
   });
+
   const url = new URL(request.url);
   const chargeId = url.searchParams.get("charge_id");
 
@@ -44,12 +30,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           billing_id: billing.subscription_id,
           updated_at: new Date().toISOString(),
         })
-        .eq("shop_domain", session.shop);
+        .eq("id", store.id);
 
-      return redirect("/app?billing=active");
-    }
+      // Link plan key to agent settings
+      let planKey = "growth";
+      if (billing.current_plan?.includes("Scale")) planKey = "scale";
+      if (billing.current_plan?.includes("Elite")) planKey = "elite";
 
-    if (billing.active) {
+      await supabase.from("merchant_agent_settings")
+        .upsert({ store_id: store.id, plan_key: planKey }, { onConflict: "store_id" });
+
       return redirect("/app?billing=active");
     }
   }
@@ -61,6 +51,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     billing: {
       active: billing.active,
       trial_days: billing.trial_days_remaining || 0,
+      current_plan: billing.current_plan || "None"
     },
     storeReady: Boolean(store),
     testMode: process.env.SHOPIFY_BILLING_TEST !== "false",
@@ -76,16 +67,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (!store) {
     return json<ActionResult>(
-      { error: "Store data is still syncing. Refresh the app and try billing again." },
+      { error: "Store data is still syncing. Refresh and try again." },
       { status: 503 }
     );
   }
+
+  const formData = await request.formData();
+  const planName = String(formData.get("planName") || "ANOTAI Growth");
+  const planPrice = Number(formData.get("planPrice") || 999.0);
 
   const origin = new URL(request.url).origin;
   const returnUrl = `${origin}/app/billing?shop=${encodeURIComponent(session.shop)}`;
 
   try {
-    const confirmationUrl = await createBillingCharge(admin, returnUrl);
+    const confirmationUrl = await createBillingCharge(admin, returnUrl, planName, planPrice);
     if (confirmationUrl) {
       return redirect(confirmationUrl);
     }
@@ -100,7 +95,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function BillingPage() {
-  const { billing, storeReady, testMode } = useLoaderData<typeof loader>();
+  const { shop, billing, storeReady, testMode } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
 
   return (
@@ -110,169 +105,230 @@ export default function BillingPage() {
       <main className="main-content">
         <div className="page-header">
           <div>
-            <h1 className="page-title">Founder Beta Plan</h1>
+            <h1 className="page-title">Subscription Plans</h1>
             <p className="page-subtitle">
-              Shopify-native billing for the approval-first ANOTAI beta. Test mode is safe for the dev store.
+              Scale your revenue with an AI virtual team. Select the plan that matches your monthly recurring revenue.
             </p>
           </div>
-          <span className="beta-pill">{billing.active ? "Active" : testMode ? "Test mode" : "Live mode"}</span>
+          <span className="beta-pill">{billing.active ? "Active" : testMode ? "Test Mode" : "Production"}</span>
         </div>
 
         {actionData?.error && <div style={errorStyle}>{actionData.error}</div>}
         {!storeReady && (
           <div style={warningStyle}>
-            Store data is still syncing. Billing status can be viewed, but starting a new approval needs
-            the database connection to be healthy.
+            Store data is still syncing. Refresh the page before starting a new subscription.
           </div>
         )}
 
-        <div style={billingHeroStyle}>
-          <div>
-            <span className="readiness-label">AI revenue team</span>
-            <h2 style={billingTitleStyle}>$999/month starter beta</h2>
-            <p style={billingCopyStyle}>
-              Five agents help a Shopify founder recover carts, protect margin, spot retention signals,
-              and review revenue actions before anything risky runs automatically.
-            </p>
-          </div>
+        <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', justifyContent: 'center', marginTop: '20px' }}>
+          
+          {/* GROWTH PLAN */}
+          <PlanCard 
+            name="ANOTAI Growth" 
+            price={999} 
+            tagline="For stores $50K - $150K/mo."
+            features={[
+              "6 Active Agents",
+              "5,000 AI Interactions",
+              "500 Recovery Emails",
+              "Approval-first mode"
+            ]}
+            isActive={billing.current_plan?.includes("Growth")}
+          />
 
-          <div style={priceBoxStyle}>
-            <strong>$999</strong>
-            <span>/month</span>
-            <small>7-day trial</small>
-          </div>
+          {/* SCALE PLAN */}
+          <PlanCard 
+            name="ANOTAI Scale" 
+            price={1999} 
+            tagline="For stores $150K - $500K/mo."
+            features={[
+              "12 Active Agents",
+              "20,000 AI Interactions",
+              "2,000 Recovery Emails",
+              "Limited War Room mode"
+            ]}
+            popular
+            isActive={billing.current_plan?.includes("Scale")}
+          />
+
+          {/* ELITE PLAN */}
+          <PlanCard 
+            name="ANOTAI Elite" 
+            price={2599} 
+            tagline="For stores $500K+/mo."
+            features={[
+              "24-Agent Virtual Team",
+              "50,000 AI Interactions",
+              "5,000 Recovery Emails",
+              "Full War Room mode"
+            ]}
+            isActive={billing.current_plan?.includes("Elite")}
+          />
+
         </div>
 
-        <div className="ops-grid">
-          <div className="ops-card">
-            <div className="ops-card-header">
-              <span>Included in beta</span>
-              <strong>{billing.active ? "Unlocked" : "Approval required"}</strong>
-            </div>
-            <div style={includeListStyle}>
-              {betaIncludes.map((item) => (
-                <div style={includeRowStyle} key={item}>
-                  <span style={checkStyle}>OK</span>
-                  <span>{item}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="ops-card">
-            <div className="ops-card-header">
-              <span>Billing status</span>
-              <strong className={billing.active ? "" : "danger-text"}>
-                {billing.active ? "Active" : "Needs approval"}
-              </strong>
-            </div>
+        {billing.active && (
+          <div className="card" style={{ marginTop: '40px', border: '1px solid var(--green)', background: 'var(--gray-50)' }}>
+            <h2 className="section-title">Active Subscription</h2>
             <p style={statusCopyStyle}>
-              {billing.active
-                ? "The plan is active. Keep agents in approval mode until the merchant confirms the workflow."
-                : "Use the Shopify approval screen to simulate the $999 subscription on the dev store."}
+              Your {billing.current_plan} plan is active. Agents are operating within your safety limits.
             </p>
             {billing.trial_days > 0 && (
               <p style={trialStyle}>{billing.trial_days} trial days remaining</p>
             )}
-            {billing.active ? (
-              <Link to="/app" className="primary-action">Open Dashboard</Link>
-            ) : (
-              <Form method="post">
-                <button type="submit" className="primary-action">Start Shopify Billing Test</button>
-              </Form>
-            )}
           </div>
-        </div>
-
-        <div className="card">
-          <h2 className="section-title">Agent package</h2>
-          <div style={agentGridStyle}>
-            {starterAgents.map(([initials, name, text]) => (
-              <div style={agentPlanCardStyle} key={name}>
-                <span style={agentBadgeStyle}>{initials}</span>
-                <strong>{name}</strong>
-                <p>{text}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="card">
-          <h2 className="section-title">Safe beta rule</h2>
-          <p style={statusCopyStyle}>
-            During beta, customer-facing email sends, discount creation, and high-impact campaigns should stay
-            in owner approval mode. This protects trust while the store validates recovered revenue.
-          </p>
-        </div>
+        )}
       </main>
     </div>
   );
 }
 
-const billingHeroStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "1fr 220px",
-  gap: 20,
-  alignItems: "stretch",
+function PlanCard({ name, price, tagline, features, popular, isActive }: { name: string, price: number, tagline: string, features: string[], popular?: boolean, isActive?: boolean }) {
+  return (
+    <div style={{
+      ...planCardBaseStyle,
+      ...(popular ? popularPlanStyle : {}),
+      ...(isActive ? activePlanStyle : {})
+    }}>
+      {popular && <div style={popularBadgeStyle}>POPULAR</div>}
+      {isActive && <div style={activeBadgeStyle}>CURRENT PLAN</div>}
+      <h2 style={planTitleStyle}>{name}</h2>
+      <p style={planTaglineStyle}>{tagline}</p>
+      
+      <div style={pricingBoxStyle}>
+        <span style={priceStyle}>${price.toLocaleString()}</span>
+        <span style={periodStyle}>/mo</span>
+      </div>
+
+      <ul style={featureListStyle}>
+        {features.map((f, i) => (
+          <li key={i} style={featureItemStyle}>
+            <span style={{ color: 'var(--green)', marginRight: '8px' }}>✓</span> {f}
+          </li>
+        ))}
+      </ul>
+
+      <Form method="post">
+        <input type="hidden" name="planName" value={name} />
+        <input type="hidden" name="planPrice" value={price} />
+        <button type="submit" disabled={isActive} style={{
+          ...ctaButtonStyle,
+          ...(popular ? { background: '#8B5CF6' } : {}),
+          ...(isActive ? { background: 'var(--gray-200)', color: 'var(--gray-500)', cursor: 'default' } : {})
+        }}>
+          {isActive ? "Active Plan" : "Start 7-Day Trial"}
+        </button>
+      </Form>
+    </div>
+  );
+}
+
+const planCardBaseStyle: React.CSSProperties = {
+  background: "#FFFFFF",
+  border: "1px solid #E2E8F0",
+  borderRadius: 16,
+  padding: 32,
+  width: 320,
+  textAlign: "left",
+  boxShadow: "0 10px 15px -3px rgba(15, 23, 42, 0.1)",
+  position: "relative",
+  display: 'flex',
+  flexDirection: 'column'
+};
+
+const popularPlanStyle: React.CSSProperties = {
+  border: '2px solid #8B5CF6',
+  transform: 'scale(1.05)',
+  zIndex: 10
+};
+
+const activePlanStyle: React.CSSProperties = {
+  borderColor: 'var(--green)',
+  background: '#F0FDF4'
+};
+
+const popularBadgeStyle: React.CSSProperties = {
+  position: 'absolute',
+  top: -12,
+  left: '50%',
+  transform: 'translateX(-50%)',
+  background: '#8B5CF6',
+  color: 'white',
+  padding: '4px 12px',
+  borderRadius: 999,
+  fontSize: 10,
+  fontWeight: 900,
+  letterSpacing: 1
+};
+
+const activeBadgeStyle: React.CSSProperties = {
+  position: 'absolute',
+  top: -12,
+  left: '50%',
+  transform: 'translateX(-50%)',
+  background: 'var(--green)',
+  color: 'white',
+  padding: '4px 12px',
+  borderRadius: 999,
+  fontSize: 10,
+  fontWeight: 900,
+  letterSpacing: 1
+};
+
+const planTitleStyle: React.CSSProperties = {
+  fontSize: 24,
+  fontWeight: 800,
+  color: "#0F172A",
+  margin: "0 0 8px",
+};
+
+const planTaglineStyle: React.CSSProperties = {
+  color: "#64748B",
+  fontSize: 13,
+  margin: "0 0 20px",
+};
+
+const pricingBoxStyle: React.CSSProperties = {
+  margin: "0 0 12px",
+};
+
+const priceStyle: React.CSSProperties = {
+  fontSize: 36,
+  fontWeight: 900,
+  color: "#0F172A",
+};
+
+const periodStyle: React.CSSProperties = {
+  fontSize: 14,
+  color: "#64748B",
+};
+
+const featureListStyle: React.CSSProperties = {
+  listStyle: 'none',
+  padding: 0,
+  margin: '24px 0',
+  fontSize: 14,
+  color: "#0F172A",
+  lineHeight: 2,
+  flexGrow: 1
+};
+
+const featureItemStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center'
+};
+
+const ctaButtonStyle: React.CSSProperties = {
+  width: "100%",
+  padding: "12px",
   background: "#0F172A",
   color: "#FFFFFF",
+  border: "none",
   borderRadius: 8,
-  padding: 26,
-  marginBottom: 18,
-  boxShadow: "0 14px 36px rgba(15, 23, 42, 0.12)",
-};
-
-const billingTitleStyle: React.CSSProperties = {
-  margin: "8px 0 10px",
-  fontSize: 38,
-  lineHeight: 1,
-  letterSpacing: 0,
-};
-
-const billingCopyStyle: React.CSSProperties = {
-  maxWidth: 760,
-  margin: 0,
-  color: "#CBD5E1",
-  fontSize: 15,
-  lineHeight: 1.6,
-  fontWeight: 650,
-};
-
-const priceBoxStyle: React.CSSProperties = {
-  display: "grid",
-  alignContent: "center",
-  justifyItems: "start",
-  border: "1px solid rgba(255,255,255,0.16)",
-  borderRadius: 8,
-  padding: 18,
-  background: "rgba(255,255,255,0.07)",
-};
-
-const includeListStyle: React.CSSProperties = {
-  display: "grid",
-  gap: 10,
-};
-
-const includeRowStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 10,
-  color: "#334155",
   fontSize: 14,
-  fontWeight: 750,
-};
-
-const checkStyle: React.CSSProperties = {
-  display: "grid",
-  placeItems: "center",
-  width: 28,
-  height: 28,
-  borderRadius: 8,
-  background: "#DCFCE7",
-  color: "#166534",
-  fontSize: 10,
-  fontWeight: 1000,
-  flexShrink: 0,
+  fontWeight: 800,
+  cursor: "pointer",
+  transition: 'all 0.2s ease'
 };
 
 const statusCopyStyle: React.CSSProperties = {
@@ -285,35 +341,8 @@ const statusCopyStyle: React.CSSProperties = {
 
 const trialStyle: React.CSSProperties = {
   color: "#166534",
-  fontSize: 13,
-  fontWeight: 900,
-};
-
-const agentGridStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-  gap: 12,
-};
-
-const agentPlanCardStyle: React.CSSProperties = {
-  display: "grid",
-  gap: 8,
-  padding: 14,
-  border: "1px solid #E2E8F0",
-  borderRadius: 8,
-  background: "#F8FAFC",
-};
-
-const agentBadgeStyle: React.CSSProperties = {
-  display: "grid",
-  placeItems: "center",
-  width: 34,
-  height: 34,
-  borderRadius: 8,
-  background: "#0F172A",
-  color: "#FFFFFF",
-  fontSize: 11,
-  fontWeight: 1000,
+  fontSize: 14,
+  fontWeight: 700
 };
 
 const errorStyle: React.CSSProperties = {

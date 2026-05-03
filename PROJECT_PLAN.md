@@ -9,6 +9,7 @@ ANOTAI is a Shopify embedded Remix app that gives solo Shopify founders a 5-pers
 - First release agents: Margin Guardian, Cart Sniper, AI Personal Shopper, Retention Engine, and Revenue Analyst.
 - Default safety mode: approval required before risky actions such as discounts, margin-sensitive recovery offers, or automated campaigns go live.
 
+<<<<<<< HEAD
 ## Owner Control System
 - Worktree branch: `codex/agent-controls`.
 - Agent modes: `Approval`, `Auto`, and `Locked`.
@@ -32,6 +33,14 @@ ANOTAI is a Shopify embedded Remix app that gives solo Shopify founders a 5-pers
 - Browser realtime access uses the public `SUPABASE_ANON_KEY`.
 - Webhooks and storefront pixel events enqueue slow work into `agent_jobs` so the web app can respond quickly during traffic spikes.
 - Background workers process queued jobs separately from the web app. This is the scaling foundation for the "balloon" model: add workers when traffic grows, reduce workers when traffic drops.
+=======
+## Current Architecture
+- Shopify auth and embedded app sessions use `@shopify/shopify-app-remix` with Prisma session storage.
+- Prisma currently owns only the Shopify `Session` model and writes to local SQLite at `prisma/dev.sqlite`.
+- Supabase owns ANOTAI business data: stores, COGS, cart events, agent actions, and customer intents.
+- Server-side Supabase access uses `SUPABASE_SERVICE_ROLE_KEY`.
+- Browser realtime access uses the public `SUPABASE_ANON_KEY`.
+>>>>>>> origin/main
 
 ## Completed
 - Production build passes.
@@ -45,6 +54,7 @@ ANOTAI is a Shopify embedded Remix app that gives solo Shopify founders a 5-pers
 - Shopify `afterAuth` now syncs installed shops into Supabase `stores`.
 - App uninstall webhook now removes both Prisma sessions and Supabase store data.
 - Web pixel intent capture now includes the shop domain explicitly and returns CORS headers.
+<<<<<<< HEAD
 - Web pixel intent capture now queues intent work instead of doing slow agent work inside the storefront request.
 - Shopify webhooks now queue cart/order/product work instead of running slow agent actions inside the webhook response.
 - `/api/jobs/run` processes queued jobs and is protected by `JOB_RUNNER_SECRET` in production.
@@ -56,19 +66,30 @@ ANOTAI is a Shopify embedded Remix app that gives solo Shopify founders a 5-pers
 - Privacy webhook handling now verifies Shopify HMAC before processing compliance requests.
 - Customer redaction now removes store-scoped customer profiles, customer activity, customer intent, and cart event data tied to the requested customer.
 - Shop redaction now removes Shopify sessions and Supabase store data.
+=======
+- Shopify app config now declares the app scopes and webhook topics needed by the MVP.
+>>>>>>> origin/main
 - Dev preview uses non-protected Shopify scopes/topics only. `read_orders`, `read_checkouts`, `orders/create`, and `carts/update` require protected customer data approval before enabling.
 
 ## Backend/Core Work Remaining
 - Verify Supabase SQL schema is applied in the actual Supabase project.
+<<<<<<< HEAD
 - Run `supabase/20260429_agent_controls_migration.sql` in the actual Supabase project before testing owner controls on live data.
 - Run `supabase/20260429_agent_jobs_migration.sql` in the actual Supabase project before testing webhook/pixel queues.
 - Run `supabase/20260429_customer_data_migration.sql` in the actual Supabase project before testing customer memory.
 - Replace placeholder email sending with a real email provider before production.
+=======
+- Replace placeholder email sending with a real email provider before production.
+- Decide whether cart/order/product webhooks should remain on the combined `/webhooks` route or move to dedicated authenticated Shopify webhook routes.
+>>>>>>> origin/main
 - Apply for Shopify protected customer data access before enabling real cart/order recovery webhooks.
 - Harden billing lifecycle handling for cancellation, frozen charges, and plan downgrade states.
 - Add server-side validation around CSV import and numeric money fields.
 - Add logging/monitoring for webhook and agent failures.
+<<<<<<< HEAD
 - Add a reviewer-friendly onboarding gate so install, billing, and setup never land on a blank screen.
+=======
+>>>>>>> origin/main
 
 ## UI Work Remaining
 - Improve dashboard visual density and responsive polish after core flows are stable.
@@ -102,6 +123,7 @@ ANOTAI is a Shopify embedded Remix app that gives solo Shopify founders a 5-pers
 - Embedded app route redirects correctly to Shopify session-token handling for browser user agents.
 - Auth no longer waits for Supabase store sync in `afterAuth`, so slow database sync should not block Shopify auth completion.
 - COGS, Pixel, Settings, and Analytics pages now use cleaner MVP copy and safer fallbacks.
+<<<<<<< HEAD
 - Agent profiles define each agent's mission, inputs, outputs, auto-safe work, and approval-required work.
 - Agents page includes owner mode controls for all 5 agents.
 - Settings page includes global safety controls for autonomy limits.
@@ -109,3 +131,7 @@ ANOTAI is a Shopify embedded Remix app that gives solo Shopify founders a 5-pers
 - Analytics page now includes a Revenue Analyst report instead of only raw metrics.
 - Non-blocking warning remains from CSS minification inside bundled styles: `@media (--p-breakpoints-md-up) and print`. It does not fail the build.
 - Do not merge to `main` until the merchant-facing flows are manually checked in the browser: install/login, dashboard load, COGS save, billing redirect, pixel script copy, privacy webhooks, and uninstall webhook cleanup.
+=======
+- Non-blocking warning remains from CSS minification inside bundled styles: `@media (--p-breakpoints-md-up) and print`. It does not fail the build.
+- Do not merge to `main` until the merchant-facing flows are manually checked in the browser: install/login, dashboard load, COGS save, billing redirect, pixel script copy, and uninstall webhook cleanup.
+>>>>>>> origin/main
