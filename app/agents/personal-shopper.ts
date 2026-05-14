@@ -1,7 +1,9 @@
 import { validateDiscount } from "./margin-guardian";
 import { decideAgentAction, getOwnerControls } from "~/services/agent-controls.server";
 import { askAgent } from "~/utils/gemini.server";
+import { safeParseJson } from "~/utils/json.server";
 import { supabase } from "~/utils/supabase.server";
+import { ErrorLogger } from "~/services/errorLogger.server";
 
 export type ShopperCatalogProduct = {
   id: string;
@@ -227,10 +229,8 @@ Return valid JSON array only:
 
   try {
     const response = await askAgent(storeId, prompt);
-    const jsonMatch = response.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) return [];
+    const parsed = safeParseJson<any[]>(response, [], "skincare_bundle_generation", storeId, ErrorLogger);
 
-    const parsed = JSON.parse(jsonMatch[0]);
     return parsed
       .map((bundle: any) => mapBundle(bundle, triggerProduct, catalog))
       .filter((bundle: BundleSuggestion | null): bundle is BundleSuggestion => Boolean(bundle));

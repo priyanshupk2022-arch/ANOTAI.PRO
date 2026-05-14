@@ -10,7 +10,9 @@
 
 import { supabase } from "~/utils/supabase.server";
 import { askAgent } from "~/utils/gemini.server";
+import { safeParseJson } from "~/utils/json.server";
 import { sendEmail } from "~/services/email.server";
+import { ErrorLogger } from "~/services/errorLogger.server";
 import { assertCanSendEmail, assertCanMakeAiCall } from "~/services/kill-switch.server";
 import { decideAgentAction, getOwnerControls } from "~/services/agent-controls.server";
 import { recordCustomerActivity, upsertCustomerProfile } from "~/services/customer-data.server";
@@ -118,9 +120,8 @@ Example output: ["leather jacket", "jacket", "black jacket", "men jacket", "leat
 
   try {
     const response = await askAgent(storeId, prompt);
-    const jsonMatch = response.match(/\[[\s\S]*?\]/);
-    if (jsonMatch) {
-      const keywords = JSON.parse(jsonMatch[0]);
+    const keywords = safeParseJson<string[]>(response, [], "product_keyword_extraction", storeId, ErrorLogger);
+    if (keywords.length > 0) {
       return keywords.map((k: string) => k.toLowerCase().trim()).filter(Boolean);
     }
   } catch (error) {
@@ -307,8 +308,14 @@ Rules:
 
   try {
     const response = await askAgent(storeId, prompt);
-    const jsonMatch = response.match(/\{[\s\S]*\}/);
-    if (jsonMatch) return JSON.parse(jsonMatch[0]);
+    const parsed = safeParseJson<{ subject: string; html: string } | null>(
+      response,
+      null,
+      "vip_email_generation",
+      storeId,
+      ErrorLogger
+    );
+    if (parsed) return parsed;
   } catch (error) {
     console.error("VIP email generation failed:", error);
   }
