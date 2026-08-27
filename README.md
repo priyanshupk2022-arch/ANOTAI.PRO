@@ -1,71 +1,130 @@
-# ANOTAI
+# 🛍️ ANOTAI: Shopify Autonomous Multi-Agent Revenue Team
 
-ANOTAI is a Shopify embedded Remix app that gives Shopify founders a 5-agent AI revenue team for margin protection, cart recovery, customer intent capture, retention, and founder reporting.
+> **Shopify embedded Remix application providing e-commerce brands with an autonomous 5-agent AI revenue and operations team with hard COGS margin protections.**
 
-## Current Focus
+[![Shopify App](https://img.shields.io/badge/Shopify-Embedded%20Remix%20App-95BF47?logo=shopify)](https://shopify.dev)
+[![Polaris UI](https://img.shields.io/badge/UI-Shopify%20Polaris%2012-5C6AC4)](https://polaris.shopify.com)
+[![Remix](https://img.shields.io/badge/Framework-Remix%20Vite%202.16-black)](https://remix.run)
+[![Prisma](https://img.shields.io/badge/ORM-Prisma%206-2D3748)](https://prisma.io)
+[![Supabase](https://img.shields.io/badge/Database-Supabase%20PostgreSQL-3ECF8E)](https://supabase.com)
+[![Gemini](https://img.shields.io/badge/AI-Google%20Gemini%201.5%20Pro-blue)](https://deepmind.google/technologies/gemini/)
 
-The current branch is focused on a paid beta MVP:
+---
 
-- Dashboard and demo data for customer walkthroughs.
-- Margin Guardian COGS protection.
-- Cart Sniper recovery flow with durable jobs and idempotency.
-- Shopify Billing for the $999/month founder beta.
-- Mandatory privacy pages and GDPR webhook routes.
-- Owner controls: Approval, Auto, and Locked modes.
+## 🌟 What It Does
 
-## Project Memory
+ANOTAI gives Shopify merchants a 5-agent autonomous operations squad directly inside the Shopify Admin. It autonomously converts abandoned carts, recommends personalized products, and handles customer inquiries — while enforcing deterministic financial guardrails (**Margin Guardian**) that evaluate Cost of Goods Sold (COGS) to prevent AI agents from issuing unprofitable discounts.
 
-Before asking any AI tool to modify this app, use the project memory files:
+---
 
-- `brain/project.md`: product goal, MVP scope, current status.
-- `brain/architecture.md`: app structure, data ownership, reliability rules.
-- `brain/tasks.md`: active and remaining work.
-- `brain/decisions.md`: product, technical, and collaboration decisions.
+## 🤖 The 5-Agent Squad & Hierarchy
 
-Reusable prompts live in:
+```mermaid
+flowchart TD
+    Customer[Storefront Shopper / Webhook Event] --> Router[Intent Router & Cost Controller]
+    
+    subgraph Department Orchestration
+        Router --> Manager[Revenue / Department Manager]
+        Manager --> Specialists
+    end
 
-- `prompts/planner.md`
-- `prompts/coder.md`
-- `prompts/reviewer.md`
-- `prompts/improver.md`
+    subgraph Specialists [Autonomous Specialist Agents]
+        S1[🎯 Personal Shopper\nProduct Recommendations]
+        S2[🛒 Cart Sniper\nIdempotent Cart Recovery]
+        S3[💌 Retention Engine\nWin-back & Re-engagement]
+    end
 
-Rule: external tools can prototype or suggest ideas, but the real Shopify app must stay in this repository and pass verification before being trusted.
+    subgraph Financial Guardrail
+        Specialists --> MG{🛡️ Margin Guardian\nCOGS & Gross Margin Check}
+        MG -- Margin Violated --> Blocked[❌ Block / Force Human Approval]
+        MG -- Margin Safe --> Queue[📋 Durable Action Queue]
+    end
 
-## Development
+    subgraph Executive Escalation
+        Queue --> CEO[👑 CEO Agent Review\nHigh Risk / High Basket Size]
+        CEO --> Exec[Shopify GraphQL API Execution]
+    end
+```
 
-```shell
+---
+
+## 🔒 Financial Safety & Margin Guardian
+
+Unlike unbounded LLM chat agents that can be tricked into granting massive discounts, ANOTAI enforces a hard financial gate:
+
+- **COGS Margin Rule:** Evaluates product variant costs from Shopify and computes real-time gross margins.
+- **Veto Power:** If an AI agent attempts to offer a 20% discount on an item with a 15% margin, Margin Guardian immediately intercepts the payload, flags it with a risk score of 100, and transitions the action to manual merchant approval.
+- **Token & Cost Tracking:** Records exact input tokens, output tokens, and actual dollar costs per workflow execution in Supabase audit logs (`trackAiUsage`).
+
+---
+
+## 📂 Repository Structure
+
+```
+ANOTAI.PRO/
+├── app/
+│   ├── routes/                  # Shopify embedded Remix route handlers & Polaris pages
+│   ├── services/
+│   │   ├── orchestrator.server.ts # Hierarchical multi-agent workflow manager
+│   │   ├── agentRegistry.server.ts# Agent metadata & permission levels
+│   │   ├── actionQueue.server.ts  # Durable asynchronous action executor
+│   │   ├── usageTracker.server.ts # Gemini token & dollar cost accounting
+│   │   └── shopify-discounts.server.ts # Shopify GraphQL discount generator
+│   ├── utils/
+│   │   ├── gemini.server.ts     # Google Generative AI integration
+│   │   ├── supabase.server.ts   # Cloud PostgreSQL client
+│   │   └── store.server.ts      # Store settings & COGS data loader
+│   └── styles/dashboard.css
+├── extensions/
+│   └── anotai-widget/           # Shopify Theme App Extension (Liquid + JS)
+├── prisma/
+│   └── schema.prisma            # Shopify OAuth session storage
+├── supabase/                    # Production SQL schema & migrations
+│   ├── 20260429_agent_controls_migration.sql
+│   ├── 20260429_agent_jobs_migration.sql
+│   └── 20260430_cart_recovery_hardening.sql
+├── scripts/                     # Smoke tests & load simulation
+└── package.json
+```
+
+---
+
+## 🚀 Local Setup & Development
+
+```bash
+# 1. Install dependencies
 npm install
+
+# 2. Generate Prisma client & sync schema
 npx prisma generate
 npx prisma db push
+
+# 3. Start Shopify app development server
 npm run dev
 ```
 
-## Verification
+---
 
-```shell
+## 🧪 Verification & Smoke Testing
+
+```bash
+# TypeScript verification
 npx tsc --noEmit
-npm run lint
+
+# Production build test
 npm run build
-```
 
-Public smoke routes can be checked after a local server is running:
-
-```shell
+# Public endpoint smoke tests
 npm run smoke:public
 ```
 
-## Supabase
+---
 
-Supabase SQL files live in `supabase/`. Apply the migrations in the real Supabase project before testing live data flows:
+## 📊 Status & Roadmap
 
-- `supabase/20260429_agent_controls_migration.sql`
-- `supabase/20260429_agent_jobs_migration.sql`
-- `supabase/20260429_customer_data_migration.sql`
-- `supabase/20260430_cart_recovery_hardening.sql`
-
-## Shopify Notes
-
-- Local preview URLs from Cloudflare can expire; update `SHOPIFY_APP_URL` and `shopify.app.toml` when the tunnel changes.
-- Public app review needs Shopify-native billing and privacy compliance webhooks.
-- Protected customer data scopes/topics require Shopify approval before real cart/order recovery can run at production scale.
+- **Status:** `Paid Beta MVP (v1.0.0)` — Embedded Shopify Polaris UI, hierarchical orchestrator, Margin Guardian veto, and Supabase migrations operational.
+- **Roadmap:**
+  - [ ] Real-time inventory webhook subscriptions for multi-location warehouse sync.
+  - [ ] Multi-currency margin computation for international Shopify Plus stores.
+  - [ ] Fine-tuned local model deployment for zero-cloud latency on high-throughput storefront chat.
 
